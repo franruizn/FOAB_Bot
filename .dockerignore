@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.local
+.env.example
+node_modules
+npm-debug.log*
+docs
+scripts
+data
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+.local

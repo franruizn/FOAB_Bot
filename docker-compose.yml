@@ -1,0 +1,12 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Fijo a propósito, no viene del .env: debe coincidir exactamente con
+      # el punto de montaje del volumen de abajo.
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
