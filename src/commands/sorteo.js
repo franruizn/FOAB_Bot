@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder } from 'discord.js';
 import { isOfficer } from '../permissions.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
 import { buildRaffleAnnouncementContent } from '../ui/raffleEmbed.js';
@@ -9,10 +9,12 @@ import { scheduleRaffleResolution } from '../raffleScheduler.js';
 const MIN_MINUTES = 1;
 const MAX_MINUTES = 1440;
 
+// Visible para todos en el picker de Discord a propósito: el filtro real es
+// isOfficer() (OFFICER_ROLE_ID) en runtime, no un permiso de Discord por
+// servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder()
   .setName('sorteo')
   .setDescription('Lanza un sorteo en este canal (solo oficiales)')
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addIntegerOption((option) =>
     option
       .setName('minutos')

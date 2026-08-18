@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +12,10 @@ const PACKAGE_JSON_PATH = fileURLToPath(new URL('../../package.json', import.met
 const EMBED_COLOR = 0x00ff9d;
 const PING_TIMEOUT_MS = 5_000;
 
-export const data = new SlashCommandBuilder()
-  .setName('health')
-  .setDescription('Estado del bot (solo oficiales)')
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+// Visible para todos en el picker de Discord a propósito: el filtro real es
+// isOfficer() (OFFICER_ROLE_ID) en runtime, no un permiso de Discord por
+// servidor que haya que reconfigurar a mano en cada uno.
+export const data = new SlashCommandBuilder().setName('health').setDescription('Estado del bot (solo oficiales)');
 
 function formatUptime(seconds) {
   const days = Math.floor(seconds / 86400);

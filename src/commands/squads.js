@@ -1,11 +1,4 @@
-import {
-  SlashCommandBuilder,
-  PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  escapeMarkdown,
-} from 'discord.js';
+import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, escapeMarkdown } from 'discord.js';
 import { loadConfig, ConfigError } from '../services/config.js';
 import {
   SquadCommandError,
@@ -28,10 +21,12 @@ const READ_ONLY_SUBCOMMANDS = new Set(['list', 'show', 'find']);
 const CONFIRM_TIMEOUT_MS = 30_000;
 const AUTOCOMPLETE_LIMIT = 25;
 
+// Visible para todos en el picker de Discord a propósito: el filtro real es
+// isOfficer() (OFFICER_ROLE_ID) en runtime, no un permiso de Discord por
+// servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder()
   .setName('squads')
   .setDescription('Administra los squads y gremios trackeados (solo oficiales)')
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand((sub) => sub.setName('list').setDescription('Lista todos los squads con su número de miembros'))
   .addSubcommand((sub) =>
     sub
