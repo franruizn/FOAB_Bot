@@ -2,6 +2,7 @@ import { InvalidLinkError } from './services/albionbb.js';
 import { AlbionApiError } from './services/albionApi.js';
 import { AlbionbbApiError } from './services/albionbbApi.js';
 import { ConfigError } from './services/config.js';
+import { SheetsError } from './services/sheets.js';
 import { errorEmbed } from './ui/errorEmbed.js';
 import { isOfficer } from './permissions.js';
 
@@ -66,6 +67,15 @@ function classifyError(error) {
     console.error(`ConfigError (${error.reason}) en "${error.path}": ${error.message}`);
     return {
       embed: errorEmbed('Error de configuración', error.message),
+      officerOnly: true,
+      known: true,
+    };
+  }
+
+  if (error instanceof SheetsError) {
+    console.error(`SheetsError${error.status ? ` (${error.status})` : ''}: ${error.message}`);
+    return {
+      embed: errorEmbed('No se pudo sincronizar con la hoja', error.message),
       officerOnly: true,
       known: true,
     };

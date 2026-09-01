@@ -79,5 +79,5 @@ export async function execute(interaction) {
   };
 
   await addRaffle(RAFFLES_PATH, raffle);
-  scheduleRaffleResolution(interaction.client, raffle, message);
+  scheduleRaffleResolution(interaction.client, raffle, message, interaction.user.id);
 }

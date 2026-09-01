@@ -13,10 +13,12 @@
     "deploy:prod": "node src/deploy-commands.js global",
     "deploy:clean": "node src/deploy-commands.js clean",
     "test": "node --test \"src/**/*.test.js\"",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "verify:sheets": "node scripts/sheets-verify.mjs"
   },
   "dependencies": {
     "discord.js": "^14.16.3",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "google-auth-library": "^11.0.2"
   }
 }

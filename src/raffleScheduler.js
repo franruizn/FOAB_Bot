@@ -72,7 +72,7 @@ function applyTiebreak(results) {
  * @param {{ id: string, channelId: string, messageId: string }} raffle
  * @param {{ delayed?: boolean }} [options]
  */
-export async function resolveRaffle(client, raffle, originalMessage, { delayed = false } = {}) {
+export async function resolveRaffle(client, raffle, creatorId, { delayed = false } = {}) {
   activeTimers.delete(raffle.id);
 
   let channel;
@@ -108,8 +108,9 @@ export async function resolveRaffle(client, raffle, originalMessage, { delayed =
   }
 
   const { sorted, tiebreak } = applyTiebreak(rollParticipants(participants));
+  const winner = sorted[0];
   const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak });
-  await channel.send({ embeds: [embed], reply });
+  await channel.send({ content: `<@${winner.user.id}> ha ganado el sorteo de <@${creatorId}>`, embeds: [embed], reply });
 
   await removeRaffle(RAFFLES_PATH, raffle.id);
 
@@ -120,10 +121,10 @@ export async function resolveRaffle(client, raffle, originalMessage, { delayed =
  * @param {import('discord.js').Client} client
  * @param {{ id: string, endsAt: number }} raffle
  */
-export function scheduleRaffleResolution(client, raffle, originalMessage) {
+export function scheduleRaffleResolution(client, raffle, creatorId) {
   const delayMs = Math.max(0, raffle.endsAt - Date.now());
   const timer = setTimeout(() => {
-    resolveRaffle(client, raffle, originalMessage, { delayed: false }).catch((error) => {
+    resolveRaffle(client, raffle, creatorId, { delayed: false }).catch((error) => {
       console.error(`[raffle] Error resolviendo el sorteo ${raffle.id}:`, error?.stack ?? error);
     });
   }, delayMs);

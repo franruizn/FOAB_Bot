@@ -12,6 +12,8 @@ const SEED_SQUADS_PATH = fileURLToPath(new URL('./config/squads.seed.json', impo
 export const DATA_DIR = path.resolve(process.env.DATA_DIR || './data');
 export const SQUADS_CONFIG_PATH = path.join(DATA_DIR, 'squads.json');
 export const RAFFLES_PATH = path.join(DATA_DIR, 'raffles.json');
+export const CTA_PATH = path.join(DATA_DIR, 'cta.json');
+export const CTA_SHEET_CONFIG_PATH = path.join(DATA_DIR, 'cta-sheet-config.json');
 
 /**
  * Garantiza que DATA_DIR y squads.json existan antes de que el bot atienda

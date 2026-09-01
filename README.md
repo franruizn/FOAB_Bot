@@ -51,6 +51,144 @@ npm test        # unit tests (node:test)
 npm run smoke   # valida el pipeline real (API oficial + agregación) sin Discord
 ```
 
+## Google Sheets (cuenta de servicio)
+
+El bot escribe en una hoja de cálculo (lista de apuntados a CTA, por ejemplo)
+usando una **cuenta de servicio** de Google, no OAuth de usuario — el bot corre
+sin nadie delante y no puede completar un flujo de consentimiento interactivo.
+
+### Setup (una sola vez)
+
+1. Andá a [console.cloud.google.com](https://console.cloud.google.com) y creá un proyecto.
+2. En ese proyecto, habilitá la **Google Sheets API**.
+3. IAM y administración → Cuentas de servicio → Crear cuenta de servicio.
+4. En esa cuenta de servicio: Claves → Añadir clave → JSON → descargar. Ese
+   fichero es lo único que necesitás del lado de Google.
+5. Copiá el email de la cuenta de servicio (termina en `.iam.gserviceaccount.com`).
+6. En la hoja de cálculo: **Compartir** → pegá ese email → dale permiso de
+   **Editor**. Sin este paso la API responde 403 aunque las credenciales sean
+   correctas — el bot te lo va a decir explícitamente si te olvidás.
+
+### Dónde va el JSON
+
+El fichero descargado va montado como archivo dentro de `DATA_DIR`, **nunca**
+en el `.env` (es multilínea; meterlo en una variable de entorno obliga a
+escapados frágiles). Mismo patrón que `squads.json`:
+
+```bash
+cp ruta/al/descargado.json data/google-credentials.json
+```
+
+En Docker, esto significa copiarlo dentro del `data/` del Droplet (el mismo
+directorio bind-mounted que ya usa `squads.json`/`raffles.json`) y darle el
+mismo dueño que el resto:
+
+```bash
+sudo chown 1001:1001 data/google-credentials.json
+```
+
+### Variables de entorno
+
+```bash
+GOOGLE_CREDENTIALS_PATH=./data/google-credentials.json
+CTA_SHEET_ID=<el ID de la hoja, de la URL entre /d/ y /edit>
+CTA_SHEET_TAB=<nombre exacto de la pestaña>
+CTA_RANGO_INICIO=P3
+```
+
+`CTA_RANGO_INICIO` es la celda donde empieza el bloque de 4 columnas (nombre,
+rol1, rol2, rol3) que gestiona `src/services/sheets.js`. Igual que
+`CTA_SHEET_ID` y `CTA_SHEET_TAB`, es solo el valor de **arranque**: los tres
+se pueden cambiar en caliente sin tocar `.env` ni reiniciar con
+`/cta hoja`/`/cta pestana`/`/cta rango` (ver más abajo).
+
+### Verificar que funciona
+
+```bash
+npm run verify:sheets
+```
+
+Escribe 3 filas de prueba en la hoja y las vuelve a limpiar. Tiene que pasar
+esto **antes** de que exista ningún comando de Discord que use la hoja — si
+falla, el error te dice si es un problema de credenciales, de permisos
+(compartir la hoja), o de configuración (`CTA_SHEET_TAB` mal escrito, etc.).
+
+Además, el bot valida estas credenciales **al arrancar** (no en la primera
+escritura): busca una línea `"action":"validarCredenciales"` en los logs del
+arranque. `"result":"ok"` confirma el email de la cuenta de servicio;
+`"result":"error"` te dice exactamente qué está mal (fichero inexistente,
+JSON corrupto, faltan campos); `"result":"sin-configurar"` significa que
+`GOOGLE_CREDENTIALS_PATH` ni siquiera está puesto (no es un error si todavía
+no usas `/cta`).
+
+## `/cta`: rol de Discord, permisos e intent
+
+Además de la hoja, `/cta` crea y gestiona un rol de Discord propio por cada
+CTA (se lo da a quien se apunta, se lo quita a quien se desapunta). Esto
+necesita permisos y un intent que las demás funciones del bot no requieren:
+
+1. **Permiso "Gestionar roles"**: dáselo al rol del bot en el servidor
+   (Ajustes del servidor → Roles → el rol del bot → activa "Gestionar
+   roles"). No hace falta re-invitar al bot para esto, se puede activar
+   directamente ahí.
+2. **Jerarquía**: el rol del bot tiene que estar **por encima** de la
+   posición 1 (justo encima de @everyone) — cualquier otro rol propio que ya
+   tenga el bot por encima de @everyone es suficiente. Si el rol del bot
+   queda demasiado abajo, `/cta` lo rechaza explicándolo antes de crear nada.
+3. **Intent "Server Members"** (privilegiado): actívalo en
+   [Discord Developer Portal](https://discord.com/developers/applications) →
+   tu aplicación → **Bot** → **Privileged Gateway Intents** → **Server
+   Members Intent**. El código ya lo declara (`GatewayIntentBits.GuildMembers`
+   en `src/index.js`), pero sin activarlo también aquí el bot no puede
+   arrancar con ese intent — `guild.members.fetch()` fallaría, y con eso
+   `/cta sync` y `/cta roles` darían resultados incompletos o directamente
+   fallarían.
+4. **`CTA_OFFICER_ROLE_ID`** en `.env`: el ID del rol de oficial para `/cta`
+   (un único valor, igual de forma que `OFFICER_ROLE_ID` — separado de esa
+   variable por si algún día se quiere un rol distinto para `/cta` que para
+   `/squads`/`/health`/`/sorteo`, pero hoy pueden apuntar al mismo rol).
+5. **Registrar el comando**: `/cta` es un slash command nuevo (con
+   subcomandos `abrir`/`sync`/`roles`/`cerrar`/`hoja`/`pestana`/`rango`) —
+   hace falta `npm run deploy:dev` o `deploy:prod` (ver "Registrar los slash
+   commands" arriba) igual que con cualquier comando nuevo; no aparece solo
+   por reiniciar el bot.
+
+Ninguna dependencia nueva de npm: `/cta` reutiliza `discord.js` (ya
+instalado) y `google-auth-library` (añadido cuando se montó la hoja) — no
+hace falta tocar `package.json` para esto en producción, con `git pull` +
+rebuild de la imagen alcanza.
+
+### `/cta cerrar`, `/cta hoja`, `/cta pestana`, `/cta rango`
+
+Cuatro subcomandos de oficial, sin variables de `.env` nuevas — no hace
+falta tocar la configuración de producción para que funcionen, solo
+desplegar el código y registrar los slash commands (paso 5 arriba):
+
+- **`/cta cerrar`**: corta la CTA activa antes de tiempo. Mismo camino que
+  el cierre automático (fuerza la hoja pendiente, deshabilita los botones,
+  publica la lista final) — la única diferencia es que lo dispara un
+  oficial en vez del temporizador. Si no hay ninguna CTA activa, avisa en
+  vez de fallar.
+- **`/cta hoja <id>`**: cambia en caliente qué hoja de Google Sheets usa
+  `/cta`, sin tocar `CTA_SHEET_ID` en `.env` ni reiniciar el bot. Acepta
+  tanto el ID suelto como la URL completa (se queda solo con el trozo entre
+  `/d/` y la siguiente `/`). Recuerda compartir la hoja nueva con la cuenta
+  de servicio si no lo estaba ya.
+- **`/cta pestana <nombre>`**: igual que `/cta hoja`, pero para
+  `CTA_SHEET_TAB` (el nombre exacto de la pestaña dentro de la hoja).
+- **`/cta rango <celda>`**: igual que `/cta hoja`, pero para
+  `CTA_RANGO_INICIO`. Valida el formato de la celda (ej. `P3`) antes de
+  guardar nada, con el mismo `parseCellRef()` que usa cada escritura real —
+  un error tipográfico se ve al momento, no en la siguiente escritura.
+
+Los tres cambios (hoja/pestaña/rango) se persisten en
+`DATA_DIR/cta-sheet-config.json` — sobreviven a un reinicio del bot, y
+solo afectan a la **siguiente** escritura (no a una ya agrupada en la
+ventana de 2s). Cada cambio avisa en `LOG_CHANNEL_ID` (si está configurado)
+con quién lo hizo y a qué valor. Tras cualquiera de los tres, conviene
+correr `/cta sync` (con una CTA activa) para comprobar que la nueva
+hoja/pestaña/rango funciona de verdad.
+
 ## Despliegue en VPS con Docker
 
 `/squads` escribe `squads.json` en tiempo de ejecución (altas, bajas, cambios de

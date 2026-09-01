@@ -5,6 +5,7 @@ import { data as squadsCommand } from './commands/squads.js';
 import { data as attendanceCommand } from './commands/attendance.js';
 import { data as healthCommand } from './commands/health.js';
 import { data as sorteoCommand } from './commands/sorteo.js';
+import { data as ctaCommand } from './commands/cta.js';
 
 const VALID_SCOPES = new Set(['guild', 'global', 'clean']);
 // Acepta el modo como argumento CLI (para que los scripts de package.json
@@ -37,9 +38,14 @@ try {
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: [] });
     console.log('Comandos de guild eliminados.');
   } else {
-    const commands = [getkillsCommand, squadsCommand, attendanceCommand, healthCommand, sorteoCommand].map((command) =>
-      command.toJSON(),
-    );
+    const commands = [
+      getkillsCommand,
+      squadsCommand,
+      attendanceCommand,
+      healthCommand,
+      sorteoCommand,
+      ctaCommand,
+    ].map((command) => command.toJSON());
 
     if (DEPLOY_SCOPE === 'guild') {
       console.log(`[dev] Registrando ${commands.length} slash commands en el servidor ${GUILD_ID} (cambios instantáneos)...`);
