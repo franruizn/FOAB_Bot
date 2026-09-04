@@ -68,11 +68,17 @@ function applyTiebreak(results) {
  * Resuelve un sorteo: lee las reacciones del mensaje de golpe (nunca
  * acumuladas en memoria), tira los dados, publica el resultado citando el
  * mensaje original, y quita el sorteo de raffles.json.
+ *
+ * `creatorId` se lee de `raffle.creatorId` (persistido en raffles.json) en
+ * vez de recibirse aparte: pasarlo como parámetro suelto en cada llamada es
+ * justo lo que causó el bug real (un `message` de discord.js acabó en su
+ * sitio — y como Message.toString() devuelve message.content, el mensaje
+ * final citaba el anuncio entero en vez de mencionar al creador).
  * @param {import('discord.js').Client} client
- * @param {{ id: string, channelId: string, messageId: string }} raffle
+ * @param {{ id: string, channelId: string, messageId: string, creatorId: string }} raffle
  * @param {{ delayed?: boolean }} [options]
  */
-export async function resolveRaffle(client, raffle, creatorId, { delayed = false } = {}) {
+export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
   activeTimers.delete(raffle.id);
 
   let channel;
@@ -110,7 +116,7 @@ export async function resolveRaffle(client, raffle, creatorId, { delayed = false
   const { sorted, tiebreak } = applyTiebreak(rollParticipants(participants));
   const winner = sorted[0];
   const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak });
-  await channel.send({ content: `<@${winner.user.id}> ha ganado el sorteo de <@${creatorId}>`, embeds: [embed], reply });
+  await channel.send({ content: `<@${winner.user.id}> ha ganado el sorteo de <@${raffle.creatorId}>`, embeds: [embed], reply });
 
   await removeRaffle(RAFFLES_PATH, raffle.id);
 
@@ -121,10 +127,10 @@ export async function resolveRaffle(client, raffle, creatorId, { delayed = false
  * @param {import('discord.js').Client} client
  * @param {{ id: string, endsAt: number }} raffle
  */
-export function scheduleRaffleResolution(client, raffle, creatorId) {
+export function scheduleRaffleResolution(client, raffle) {
   const delayMs = Math.max(0, raffle.endsAt - Date.now());
   const timer = setTimeout(() => {
-    resolveRaffle(client, raffle, creatorId, { delayed: false }).catch((error) => {
+    resolveRaffle(client, raffle, { delayed: false }).catch((error) => {
       console.error(`[raffle] Error resolviendo el sorteo ${raffle.id}:`, error?.stack ?? error);
     });
   }, delayMs);

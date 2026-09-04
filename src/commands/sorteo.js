@@ -79,5 +79,7 @@ export async function execute(interaction) {
   };
 
   await addRaffle(RAFFLES_PATH, raffle);
-  scheduleRaffleResolution(interaction.client, raffle, message, interaction.user.id);
+  // creatorId va dentro de `raffle` (persistido arriba) — no se pasa aparte:
+  // ver el comentario en resolveRaffle() sobre por qué.
+  scheduleRaffleResolution(interaction.client, raffle);
 }
