@@ -41,6 +41,53 @@ export async function notifySquadMutation(client, { actorTag, subcommand, summar
 }
 
 /**
+ * Notifica en LOG_CHANNEL_ID (si está configurado) que no se pudo asignar o
+ * quitar el rol de una CTA a un usuario concreto (member.roles.add/remove
+ * falló). No hace fallar la inscripción/salida: el estado local ya se
+ * escribió, esto es solo el aviso para que un oficial lo revise.
+ * @param {import('discord.js').Client} client
+ * @param {{ ctaId: string, userId: string, action: 'asignar' | 'quitar', error: unknown }} params
+ */
+export async function notifyCtaRoleFailure(client, { ctaId, userId, action, error }) {
+  const message = error instanceof Error ? error.message : String(error);
+  const embed = new EmbedBuilder()
+    .setColor(ERROR_COLOR)
+    .setTitle('⚠️ Fallo al gestionar el rol de una CTA')
+    .setDescription(
+      `No se pudo **${action}** el rol de la CTA \`${ctaId}\` a <@${userId}>. El JSON local ya quedó ` +
+        'actualizado (la inscripción/salida no se deshizo). Revísalo a mano si hace falta.',
+    )
+    .addFields({ name: 'Error', value: `\`\`\`${message.slice(0, 500)}\`\`\`` })
+    .setTimestamp(new Date());
+
+  await sendToLogChannel(client, embed);
+}
+
+/**
+ * Notifica en LOG_CHANNEL_ID (si está configurado) que el volcado a Google
+ * Sheets del cierre de una CTA falló (la hoja se escribe una única vez, al
+ * cerrar — ver ctaCierre.js). Se llama solo ahí, no en cada reintento
+ * fallido posterior de /cta sync — para no inundar el canal de logs con el
+ * mismo aviso.
+ * @param {import('discord.js').Client} client
+ * @param {{ ctaId: string, ctaNombre: string, error: unknown }} params
+ */
+export async function notifyCtaSheetDesync(client, { ctaId, ctaNombre, error }) {
+  const message = error instanceof Error ? error.message : String(error);
+  const embed = new EmbedBuilder()
+    .setColor(ERROR_COLOR)
+    .setTitle('📄 Volcado a Google Sheets pendiente')
+    .setDescription(
+      `El cierre de la CTA **${ctaNombre}** (\`${ctaId}\`) no se pudo volcar a Google Sheets. ` +
+        'Usa `/cta sync` en su canal para reintentarlo.',
+    )
+    .addFields({ name: 'Error', value: `\`\`\`${message.slice(0, 500)}\`\`\`` })
+    .setTimestamp(new Date());
+
+  await sendToLogChannel(client, embed);
+}
+
+/**
  * Notifica en LOG_CHANNEL_ID (si está configurado) que un comando falló con
  * un error no controlado (no un InvalidLinkError/AlbionApiError/etc. con
  * mensaje propio, sino algo inesperado que merece revisión).
