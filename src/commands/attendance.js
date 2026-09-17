@@ -1,13 +1,13 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { getGuildAttendance } from '../services/albionbbApi.js';
 import { loadConfig } from '../services/config.js';
-import { suggestClosestNames } from '../services/levenshtein.js';
 import { buildAttendanceEmbed, buildPlayerNotFoundEmbed } from '../ui/attendanceEmbed.js';
 import { SQUADS_CONFIG_PATH } from '../dataPaths.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_DAYS = 30;
 const AUTOCOMPLETE_LIMIT = 25;
+const SUGGESTION_COUNT = 3;
 
 export const data = new SlashCommandBuilder()
   .setName('attendance')
@@ -35,6 +35,46 @@ function resolveDateRange(days) {
   const end = new Date();
   const start = new Date(end.getTime() - days * DAY_MS);
   return { start: formatDate(start), end: formatDate(end) };
+}
+
+/**
+ * Distancia de Levenshtein clásica (DP de dos filas), sin dependencias.
+ */
+function levenshteinDistance(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  let prevRow = Array.from({ length: b.length + 1 }, (_, j) => j);
+  let currRow = new Array(b.length + 1);
+
+  for (let i = 1; i <= a.length; i++) {
+    currRow[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      currRow[j] = Math.min(currRow[j - 1] + 1, prevRow[j] + 1, prevRow[j - 1] + cost);
+    }
+    [prevRow, currRow] = [currRow, prevRow];
+  }
+
+  return prevRow[b.length];
+}
+
+function suggestClosestNames(input, names, limit = SUGGESTION_COUNT) {
+  const inputLower = input.toLowerCase();
+  const scored = names
+    .map((name) => ({ name, distance: levenshteinDistance(inputLower, name.toLowerCase()) }))
+    .sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+
+  const seen = new Set();
+  const result = [];
+  for (const item of scored) {
+    const key = item.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item.name);
+    if (result.length >= limit) break;
+  }
+  return result;
 }
 
 function requireEnv() {

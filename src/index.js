@@ -3,7 +3,6 @@ import { Client, Collection, Events, GatewayIntentBits, Partials } from 'discord
 import * as getkills from './commands/getkills.js';
 import * as squads from './commands/squads.js';
 import * as attendance from './commands/attendance.js';
-import * as score from './commands/score.js';
 import * as health from './commands/health.js';
 import * as sorteo from './commands/sorteo.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
@@ -43,7 +42,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, score, health, sorteo]) {
+for (const command of [getkills, squads, attendance, health, sorteo]) {
   client.commands.set(command.data.name, command);
 }
 
