@@ -56,7 +56,7 @@ function buildBucketValue(bucket, totalKills) {
   const isMain = bucket.key === 'main';
   const rosterTitle = isMain ? 'Top killers' : 'Players';
   const sorted = [...bucket.players].sort(byKillsThenName);
-  const roster = sorted.slice(0, MAIN_ZERG_TOP_N);
+  const roster = isMain ? sorted.slice(0, MAIN_ZERG_TOP_N) : sorted;
 
   const lines = roster.map((p) => formatPlayerLine(p.name, p.kills));
   const prefix = `${header}\n\n__${rosterTitle}__\n`;
