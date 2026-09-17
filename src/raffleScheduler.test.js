@@ -19,10 +19,9 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Dobles mínimos, locales a este fichero: /cta usa src/testHelpers/discordFakes.js,
-// pero un sorteo necesita reacciones y message.content (que ese doble
-// compartido no modela), así que aquí van los suyos, con la misma filosofía
-// de duck-typing (solo lo que raffleScheduler.js llama de verdad).
+// Dobles mínimos, locales a este fichero: un sorteo necesita reacciones y
+// message.content, así que aquí van los suyos, con duck-typing (solo lo que
+// raffleScheduler.js llama de verdad).
 
 class FakeUser {
   constructor(id, bot = false) {

@@ -6,7 +6,6 @@ import { data as attendanceCommand } from './commands/attendance.js';
 import { data as scoreCommand } from './commands/score.js';
 import { data as healthCommand } from './commands/health.js';
 import { data as sorteoCommand } from './commands/sorteo.js';
-import { data as ctaCommand } from './commands/cta.js';
 
 const VALID_SCOPES = new Set(['guild', 'global', 'clean']);
 // Acepta el modo como argumento CLI (para que los scripts de package.json
@@ -46,7 +45,6 @@ try {
       scoreCommand,
       healthCommand,
       sorteoCommand,
-      ctaCommand,
     ].map((command) => command.toJSON());
 
     if (DEPLOY_SCOPE === 'guild') {
