@@ -3,6 +3,7 @@ import { parseAlbionbbUrl } from '../services/albionbb.js';
 import { getBattleEvents } from '../services/albionApi.js';
 import { loadConfig } from '../services/config.js';
 import { aggregateBattle } from '../services/aggregate.js';
+import { resolveBattleDate } from '../services/battleDate.js';
 import { buildKillsEmbed } from '../ui/killsEmbed.js';
 import { SQUADS_CONFIG_PATH } from '../dataPaths.js';
 
@@ -15,18 +16,6 @@ export const data = new SlashCommandBuilder()
       .setDescription('Enlace de albionbb a la batalla, ej. https://europe.albionbb.com/battles/418186013')
       .setRequired(true),
   );
-
-/**
- * Fecha a mostrar en el embed: la del evento más antiguo (inicio aproximado
- * de la batalla). Si no hay eventos, se usa la hora actual como fallback.
- */
-function resolveBattleDate(events) {
-  const earliest = events.reduce((acc, event) => {
-    const eventDate = new Date(event.TimeStamp);
-    return acc === null || eventDate < acc ? eventDate : acc;
-  }, null);
-  return earliest ?? new Date();
-}
 
 /**
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
