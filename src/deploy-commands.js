@@ -3,6 +3,9 @@ import { REST, Routes } from 'discord.js';
 import { data as getkillsCommand } from './commands/getkills.js';
 import { data as squadsCommand } from './commands/squads.js';
 import { data as attendanceCommand } from './commands/attendance.js';
+import { data as compCommand } from './commands/comp.js';
+import { data as ctaCommand } from './commands/cta.js';
+import { data as maestriaCommand } from './commands/maestria.js';
 import { data as healthCommand } from './commands/health.js';
 import { data as sorteoCommand } from './commands/sorteo.js';
 
@@ -41,6 +44,9 @@ try {
       getkillsCommand,
       squadsCommand,
       attendanceCommand,
+      compCommand,
+      ctaCommand,
+      maestriaCommand,
       healthCommand,
       sorteoCommand,
     ].map((command) => command.toJSON());

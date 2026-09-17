@@ -12,6 +12,11 @@ const SEED_SQUADS_PATH = fileURLToPath(new URL('./config/squads.seed.json', impo
 export const DATA_DIR = path.resolve(process.env.DATA_DIR || './data');
 export const SQUADS_CONFIG_PATH = path.join(DATA_DIR, 'squads.json');
 export const RAFFLES_PATH = path.join(DATA_DIR, 'raffles.json');
+export const CTA_PATH = path.join(DATA_DIR, 'cta.json');
+export const CTA_COMPS_PATH = path.join(DATA_DIR, 'comps.json');
+// Fuente de verdad de la maestría por (jugador, rol): cuántas veces cerró
+// una CTA con esa persona asignada a ese rol (ver services/maestria.js).
+export const MAESTRIA_PATH = path.join(DATA_DIR, 'maestria.json');
 
 /**
  * Garantiza que DATA_DIR y squads.json existan antes de que el bot atienda

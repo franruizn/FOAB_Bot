@@ -3,14 +3,20 @@ import { Client, Collection, Events, GatewayIntentBits, Partials } from 'discord
 import * as getkills from './commands/getkills.js';
 import * as squads from './commands/squads.js';
 import * as attendance from './commands/attendance.js';
+import * as comp from './commands/comp.js';
+import * as cta from './commands/cta.js';
+import * as maestria from './commands/maestria.js';
 import * as health from './commands/health.js';
 import * as sorteo from './commands/sorteo.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
 import { ensureSquadsConfig } from './dataPaths.js';
 import { waitForPendingWrites } from './services/squadsStore.js';
 import { waitForPendingRaffleWrites } from './services/rafflesStore.js';
+import { waitForPendingCtaWrites } from './services/ctaStore.js';
 import { notifyUncontrolledError } from './logChannel.js';
 import { initializeRaffles } from './raffleScheduler.js';
+import { initializeCtaTimers } from './ctaScheduler.js';
+import { flushPendingEmbedRefreshes } from './ctaEmbedSync.js';
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -36,13 +42,27 @@ process.on('uncaughtException', (error) => {
 // reinicio el mensaje del sorteo no está en caché, y sin Partials.Message /
 // Partials.Reaction las reacciones de un mensaje no cacheado llegan
 // incompletas.
+// GuildVoiceStates NO es un intent privilegiado (no hace falta activarlo en
+// el Developer Portal). Lo necesita /cta voz para ver quién está en el
+// canal de voz del oficial que lo ejecuta.
+//
+// GuildMembers SÍ es un intent PRIVILEGIADO: hay que activar "Server
+// Members Intent" en el Developer Portal del bot (pestaña Bot), si no
+// `guild.members.fetch()` falla en producción. Lo necesita /cta sync para
+// reconciliar el rol de una CTA abierta (services/ctaRole.js,
+// reconciliarRolDeCta) contra quién está inscrito de verdad ahora mismo.
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessageReactions],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMembers,
+  ],
   partials: [Partials.Message, Partials.Reaction, Partials.Channel],
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, health, sorteo]) {
+for (const command of [getkills, squads, attendance, comp, cta, maestria, health, sorteo]) {
   client.commands.set(command.data.name, command);
 }
 
@@ -52,6 +72,11 @@ client.once(Events.ClientReady, async (readyClient) => {
     await initializeRaffles(readyClient);
   } catch (error) {
     console.error('[raffle] Error inicializando sorteos pendientes:', error?.stack ?? error);
+  }
+  try {
+    await initializeCtaTimers(readyClient);
+  } catch (error) {
+    console.error('[cta] Error inicializando las CTAs activas:', error?.stack ?? error);
   }
 });
 
@@ -89,10 +114,54 @@ function logCommand({ interaction, durationMs, result, error }) {
   console.log(JSON.stringify(entry));
 }
 
+function logComponentInteraction({ interaction, kind, durationMs, result, error }) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    type: 'component',
+    kind,
+    customId: interaction.customId,
+    user: interaction.user?.tag ?? 'unknown',
+    userId: interaction.user?.id ?? null,
+    guildId: interaction.guildId ?? null,
+    durationMs,
+    result,
+  };
+  if (error) entry.error = error instanceof Error ? error.message : String(error);
+  console.log(JSON.stringify(entry));
+}
+
 let isShuttingDown = false;
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (isShuttingDown) return; // no aceptar trabajo nuevo mientras cerramos
+
+  // Botones y selects de una CTA (Apuntarse/Tentativo/Salir/Panel del
+  // caller, y el panel de inscripción) son componentes PERSISTENTES: siguen
+  // vivos horas y sobreviven a un reinicio del bot, así que se enrutan por
+  // customId aquí (el dispatcher global) en vez de con un collector local
+  // como hace /squads con su confirmación de borrado (que solo vive 30s).
+  // Solo se intercepta lo que parsea como customId de CTA: todo lo demás
+  // (confirmaciones de /squads, /comp) sigue yendo a sus propios
+  // awaitMessageComponent() sin que este bloque los toque.
+  if ((interaction.isButton() || interaction.isStringSelectMenu()) && cta.isCtaComponent(interaction.customId)) {
+    const startedAt = Date.now();
+    const kind = interaction.isButton() ? 'button' : 'select';
+    try {
+      if (interaction.isButton()) {
+        await cta.handleButton(interaction);
+      } else {
+        await cta.handleSelectMenu(interaction);
+      }
+      logComponentInteraction({ interaction, kind, durationMs: Date.now() - startedAt, result: 'ok' });
+    } catch (error) {
+      logComponentInteraction({ interaction, kind, durationMs: Date.now() - startedAt, result: 'error', error });
+      const { known } = await handleInteractionError(interaction, error);
+      if (!known) {
+        await notifyUncontrolledError(client, { commandName: `cta (${kind})`, actorTag: interaction.user.tag, error });
+      }
+    }
+    return;
+  }
 
   if (interaction.isAutocomplete()) {
     const command = client.commands.get(interaction.commandName);
@@ -142,9 +211,13 @@ async function shutdown(signal) {
   console.log(JSON.stringify({ timestamp: new Date().toISOString(), type: 'shutdown', msg: `Señal ${signal} recibida, cerrando...` }));
 
   try {
-    // Espera cualquier escritura de squads.json o raffles.json ya en curso
-    // (tmp + rename) antes de desconectar, para no cortarla a mitad.
-    await Promise.all([waitForPendingWrites(), waitForPendingRaffleWrites()]);
+    // Fuerza cualquier reedición de embed de CTA agrupada (2s) pendiente
+    // ANTES de esperar las escrituras: una reedición puede depender del
+    // estado que la última escritura acaba de dejar.
+    await flushPendingEmbedRefreshes();
+    // Espera cualquier escritura de squads.json, raffles.json o cta.json ya
+    // en curso (tmp + rename) antes de desconectar, para no cortarla a mitad.
+    await Promise.all([waitForPendingWrites(), waitForPendingRaffleWrites(), waitForPendingCtaWrites()]);
   } catch (error) {
     console.error('[shutdown] Error esperando escrituras pendientes:', error?.stack ?? error);
   }
