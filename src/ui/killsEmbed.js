@@ -1,4 +1,5 @@
 import { EmbedBuilder, escapeMarkdown } from 'discord.js';
+import { truncateList } from './textTruncate.js';
 
 const EMBED_COLOR = 0x00ff9d;
 const FIELD_VALUE_MAX = 1024;
@@ -15,31 +16,6 @@ function byKillsThenName(a, b) {
 
 function formatPlayerLine(name, kills) {
   return `${escapeMarkdown(name)} (${kills})`;
-}
-
-/**
- * Une `lines` con '\n' recortando al último elemento que quepa entero dentro
- * de `maxLength`, y añade "… +N más" con lo que sobre. Nunca parte un nombre
- * a la mitad.
- */
-function truncateList(lines, maxLength) {
-  const joined = lines.join('\n');
-  if (joined.length <= maxLength) return joined;
-
-  const kept = [];
-  let acc = '';
-  for (const line of lines) {
-    const candidate = acc ? `${acc}\n${line}` : line;
-    const remainingAfter = lines.length - (kept.length + 1);
-    const suffix = remainingAfter > 0 ? `\n… +${remainingAfter} más` : '';
-    if ((candidate + suffix).length > maxLength) break;
-    acc = candidate;
-    kept.push(line);
-  }
-
-  const remaining = lines.length - kept.length;
-  if (remaining === 0) return acc;
-  return `${acc ? `${acc}\n` : ''}… +${remaining} más`;
 }
 
 /**
