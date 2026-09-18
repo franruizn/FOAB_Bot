@@ -80,6 +80,24 @@ client.once(Events.ClientReady, async (readyClient) => {
   }
 });
 
+/**
+ * Igual que Date#toISOString(), pero con el offset de la zona horaria del
+ * PROCESO (la que fije `TZ`, ver .env.example) en vez de forzar UTC ("Z"):
+ * estos logs se leen en vivo (`docker logs`) para depurar, y la hora tiene
+ * que ser la real del gremio, no la UTC. Sigue siendo ISO-8601 con offset
+ * explícito, así que sigue siendo ordenable/parseable igual que un "Z".
+ */
+function isoLocal(fecha = new Date()) {
+  const pad = (n, len = 2) => String(n).padStart(len, '0');
+  const offsetMin = -fecha.getTimezoneOffset();
+  const signo = offsetMin >= 0 ? '+' : '-';
+  const offset = `${signo}${pad(Math.floor(Math.abs(offsetMin) / 60))}:${pad(Math.abs(offsetMin) % 60)}`;
+  return (
+    `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())}` +
+    `T${pad(fecha.getHours())}:${pad(fecha.getMinutes())}:${pad(fecha.getSeconds())}.${pad(fecha.getMilliseconds(), 3)}${offset}`
+  );
+}
+
 // ApplicationCommandOptionType.SUB_COMMAND = 1, SUB_COMMAND_GROUP = 2.
 function extractOptionsForLog(interaction) {
   const flat = {};
@@ -100,7 +118,7 @@ function extractOptionsForLog(interaction) {
 
 function logCommand({ interaction, durationMs, result, error }) {
   const entry = {
-    timestamp: new Date().toISOString(),
+    timestamp: isoLocal(),
     type: 'command',
     command: interaction.commandName,
     user: interaction.user?.tag ?? 'unknown',
@@ -116,7 +134,7 @@ function logCommand({ interaction, durationMs, result, error }) {
 
 function logComponentInteraction({ interaction, kind, durationMs, result, error }) {
   const entry = {
-    timestamp: new Date().toISOString(),
+    timestamp: isoLocal(),
     type: 'component',
     kind,
     customId: interaction.customId,
@@ -208,7 +226,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 async function shutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(JSON.stringify({ timestamp: new Date().toISOString(), type: 'shutdown', msg: `Señal ${signal} recibida, cerrando...` }));
+  console.log(JSON.stringify({ timestamp: isoLocal(), type: 'shutdown', msg: `Señal ${signal} recibida, cerrando...` }));
 
   try {
     // Fuerza cualquier reedición de embed de CTA agrupada (2s) pendiente
@@ -223,7 +241,7 @@ async function shutdown(signal) {
   }
 
   client.destroy();
-  console.log(JSON.stringify({ timestamp: new Date().toISOString(), type: 'shutdown', msg: 'Cerrado limpiamente.' }));
+  console.log(JSON.stringify({ timestamp: isoLocal(), type: 'shutdown', msg: 'Cerrado limpiamente.' }));
   process.exit(0);
 }
 

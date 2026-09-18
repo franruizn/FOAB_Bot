@@ -22,14 +22,15 @@ function contieneMencionMasiva(texto) {
 }
 
 /**
- * dd/MM-HH:mm en la zona horaria del servidor del bot: EMBOS_TZ si está
- * definida, si no la zona local del proceso (nunca UTC a propósito, para
+ * dd/MM-HH:mm en la zona horaria del proceso (nunca UTC a propósito, para
  * que la hora del nombre coincida con la que vio el oficial al lanzarlo).
+ * Sin variable propia: se deja sin `timeZone` a propósito, así que usa la
+ * que ICU resuelva por defecto — en Docker, la que se fije con la variable
+ * ESTÁNDAR `TZ` (ver .env.example), sin inventar una variable propia del
+ * bot para esto.
  */
 function formatearSufijoFecha(fecha) {
-  const timeZone = process.env.EMBOS_TZ || undefined;
   const partes = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
