@@ -40,6 +40,28 @@ export function resetAuthParaTests() {
   authSingleton = null;
 }
 
+/**
+ * El "client_email" del JSON de credenciales: la hoja hay que compartirla
+ * con ESTE email como editor, o cualquier llamada falla con 403/404 aunque
+ * las credenciales en sí sean válidas — el gotcha más común al configurar
+ * esto por primera vez. No hace ninguna llamada de red (solo lee el JSON de
+ * credenciales). Ver scripts/verify-sheets.mjs.
+ * @returns {Promise<string>}
+ * @throws {SheetsError}
+ */
+export async function obtenerEmailDeServicio() {
+  try {
+    const { client_email: email } = await getAuth().getCredentials();
+    if (!email) {
+      throw new SheetsError('El JSON de credenciales no tiene "client_email" (¿es de una cuenta de servicio?).');
+    }
+    return email;
+  } catch (error) {
+    if (error instanceof SheetsError) throw error;
+    throw new SheetsError(`No se pudieron cargar las credenciales de Google Sheets: ${error.message}`);
+  }
+}
+
 async function obtenerToken() {
   try {
     const client = await getAuth().getClient();
@@ -74,6 +96,66 @@ async function sheetsRequest(path, { method = 'GET', body, fetchImpl = fetch, to
   }
 
   return response.json();
+}
+
+/**
+ * Lee solo el título de la hoja (nunca escribe nada): pensada para
+ * verificar credenciales/acceso sin tocar el contenido de la spreadsheet.
+ * Si esto falla con 401/403, el login con GOOGLE_CREDENTIALS_PATH no
+ * sirvió o la cuenta de servicio no tiene la hoja compartida; si falla con
+ * 404, CTA_SHEET_ID está mal. Ver scripts/verify-sheets.mjs.
+ * @param {string} spreadsheetId
+ * @param {object} [reqOptions] - fetchImpl/tokenImpl para tests
+ * @returns {Promise<{ titulo: string }>}
+ * @throws {SheetsError}
+ */
+export async function obtenerMetadatosHoja(spreadsheetId, reqOptions = {}) {
+  const resultado = await sheetsRequest(`/${spreadsheetId}?fields=properties.title`, reqOptions);
+  return { titulo: resultado.properties?.title ?? '' };
+}
+
+/**
+ * Valida GOOGLE_CREDENTIALS_PATH/CTA_SHEET_ID de un tirón (login + acceso a
+ * la hoja, sin escribir nada) — pensada para llamarse UNA vez al arrancar
+ * el bot (ver index.js) y para scripts/verify-sheets.mjs, así que nunca
+ * lanza: el resultado en sí es la respuesta.
+ * @param {object} [reqOptions] - fetchImpl/tokenImpl para tests; solo se
+ *   usan en el paso de "acceso" (obtenerMetadatosHoja) — el de "login" lee
+ *   el JSON de credenciales directamente, no hace una petición inyectable.
+ * @returns {Promise<
+ *   | { result: 'sin-configurar' }
+ *   | { result: 'ok', email: string, titulo: string }
+ *   | { result: 'error', etapa: 'login' | 'acceso', mensaje: string, email?: string, status?: number | null }
+ * >}
+ */
+export async function validarCredenciales(reqOptions = {}) {
+  // "sheetsConfigurado()" vive en services/ctaSheet.js (comprueba lo mismo,
+  // GOOGLE_CREDENTIALS_PATH + CTA_SHEET_ID), no aquí: este fichero no sabe
+  // nada de CTAs, así que se repite la comprobación en vez de importar
+  // "hacia arriba" desde el módulo que depende de este.
+  if (!process.env.GOOGLE_CREDENTIALS_PATH || !process.env.CTA_SHEET_ID) {
+    return { result: 'sin-configurar' };
+  }
+
+  let email;
+  try {
+    email = await obtenerEmailDeServicio();
+  } catch (error) {
+    return { result: 'error', etapa: 'login', mensaje: error instanceof SheetsError ? error.message : String(error) };
+  }
+
+  try {
+    const { titulo } = await obtenerMetadatosHoja(process.env.CTA_SHEET_ID, reqOptions);
+    return { result: 'ok', email, titulo };
+  } catch (error) {
+    return {
+      result: 'error',
+      etapa: 'acceso',
+      email,
+      status: error instanceof SheetsError ? error.status : null,
+      mensaje: error instanceof SheetsError ? error.message : String(error),
+    };
+  }
 }
 
 /**

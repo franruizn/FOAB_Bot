@@ -17,6 +17,7 @@ import { notifyUncontrolledError } from './logChannel.js';
 import { initializeRaffles } from './raffleScheduler.js';
 import { initializeCtaTimers } from './ctaScheduler.js';
 import { flushPendingEmbedRefreshes } from './ctaEmbedSync.js';
+import { validarCredenciales } from './services/sheets.js';
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -77,6 +78,17 @@ client.once(Events.ClientReady, async (readyClient) => {
     await initializeCtaTimers(readyClient);
   } catch (error) {
     console.error('[cta] Error inicializando las CTAs activas:', error?.stack ?? error);
+  }
+  try {
+    // validarCredenciales() nunca lanza (su resultado ES la respuesta): esto
+    // solo salta si algo revienta antes de eso. Se comprueba una vez al
+    // arrancar para que un login/credenciales rotas se note en el log desde
+    // el minuto uno, en vez de esperar a que falle en caliente al cerrar la
+    // primera CTA del día.
+    const resultado = await validarCredenciales();
+    console.log(JSON.stringify({ timestamp: isoLocal(), type: 'startup', component: 'sheets', ...resultado }));
+  } catch (error) {
+    console.error('[sheets] Error inesperado validando las credenciales de Google Sheets:', error?.stack ?? error);
   }
 });
 

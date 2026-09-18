@@ -13,7 +13,8 @@
     "deploy:prod": "node src/deploy-commands.js global",
     "deploy:clean": "node src/deploy-commands.js clean",
     "test": "node --test \"src/**/*.test.js\"",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "verify:sheets": "node scripts/verify-sheets.mjs"
   },
   "dependencies": {
     "discord.js": "^14.16.3",
