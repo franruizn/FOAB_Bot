@@ -18,6 +18,7 @@ import {
   CtaCompError,
 } from '../services/ctaComp.js';
 import { resolverEmoji, EmojiNoEncontradoError } from '../services/emojiResolver.js';
+import { esEmojiPersonalizado } from '../ui/emojiOption.js';
 import { ctasActivas } from '../services/ctaStore.js';
 import {
   mutationEmbed,
@@ -340,12 +341,24 @@ async function handleCategoriaCrear(interaction) {
     { resolverEmoji: resolver },
   );
 
+  // En los selects del panel del caller (Asignar/Mover/Quitar/Bloquear) solo
+  // se renderiza UN emoji personalizado por opción, y ese sitio lo ocupa el
+  // arma (ver ui/ctaPanel.js) — el de categoría solo se ve ahí si es unicode.
+  // No es un error (la categoría se crea igual), solo un aviso para que no
+  // sorprenda luego.
+  const avisoEmoji = esEmojiPersonalizado(categoria.emoji)
+    ? '\n\n⚠️ Ese emoji es personalizado del servidor: en los selects del panel del caller no se verá (ahí solo se ' +
+      'renderiza el emoji del arma). Para categorías conviene un emoji unicode (🟢 🔵 🟣...).'
+    : '';
+
   await interaction.editReply({
     embeds: [
       mutationEmbed({
         title: actualizado ? 'Categoría actualizada' : 'Categoría creada',
-        description: `${categoria.emoji} **${escapeMarkdown(categoria.nombre)}** en "${resolved.comp.nombre}".` +
-          (actualizado ? '' : '\n\nAhora añade roles con `/comp rol crear`.'),
+        description:
+          `${categoria.emoji} **${escapeMarkdown(categoria.nombre)}** en "${resolved.comp.nombre}".` +
+          (actualizado ? '' : '\n\nAhora añade roles con `/comp rol crear`.') +
+          avisoEmoji,
         actorTag: interaction.user.tag,
       }),
     ],

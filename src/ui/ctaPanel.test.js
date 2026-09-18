@@ -43,6 +43,34 @@ function inscrito(overrides = {}) {
   return { userId: 'u1', nombre: 'Fran', roles: ['maza-pesada'], preferido: 'maza-pesada', tentativo: false, ts: new Date().toISOString(), ...overrides };
 }
 
+// Composición con un rol de emoji PERSONALIZADO (no unicode): el caso que
+// se veía como texto crudo en el bug original. El id es realista (17
+// dígitos) a propósito, para no depender de una longitud "cómoda".
+function compConEmojiPersonalizado() {
+  return {
+    categorias: { tanque: { nombre: 'Tanque', emoji: '🔵', orden: 1 } },
+    roles: {
+      rockmace: {
+        nombre: 'T8 Rockmace Keeper',
+        emoji: '<:T8_MAIN_ROCKMACE_KEEPER:1514416132817000000>',
+        categoria: 'tanque',
+        nota: '',
+      },
+    },
+    parties: [{ nombre: 'Party 1', slots: ['rockmace'] }],
+  };
+}
+
+// LA COMPROBACIÓN que detecta el bug sin mirar Discord: dentro de una
+// opción de select, un emoji personalizado NUNCA debe aparecer como texto
+// crudo en label/description — solo por el campo `emoji` de la opción.
+function assertSinEmojiCrudo(opcionesJson) {
+  for (const json of opcionesJson) {
+    assert.doesNotMatch(json.label, /<a?:/, `label con emoji crudo: "${json.label}"`);
+    if (json.description) assert.doesNotMatch(json.description, /<a?:/, `description con emoji crudo: "${json.description}"`);
+  }
+}
+
 // { u1: { santi: 3 } } -> la forma real de maestria.json ({ jugadores: { u1: { roles: { santi: 3 } } } })
 function maestriaFixture(porJugador) {
   return { jugadores: Object.fromEntries(Object.entries(porJugador).map(([userId, roles]) => [userId, { roles }])) };
@@ -142,7 +170,11 @@ test('buildOpcionesSlot ("Asignar"): solo libres, compatibles primero con estrel
   assert.equal(opciones.length, 6);
   const compatibleIdx = opciones.findIndex((o) => o.value === '0:2'); // santi
   assert.ok(compatibleIdx < opciones.length - 1 || opciones.length === 1);
-  assert.equal(opciones[compatibleIdx].label, 'Party 1 · 🟢 🧪 Santi ★★★');
+  // el emoji de categoría (unicode) va AL FRENTE del label, y el del arma NO
+  // va en el texto en absoluto (santi es unicode en este fixture, pero el
+  // campo emoji de la opción es donde tiene que estar de todos modos).
+  assert.equal(opciones[compatibleIdx].label, '🟢 Party 1 · Santi ★★★');
+  assert.equal(opciones[compatibleIdx].emoji.name, '🧪');
   assert.match(opciones[compatibleIdx].description, /quedan \d slot/);
 
   // el resto son incompatibles: marcados, sin estrellas
@@ -153,6 +185,83 @@ test('buildOpcionesSlot ("Asignar"): solo libres, compatibles primero con estrel
   }
   // compatibles antes que incompatibles en el orden del array
   assert.equal(opciones[0].value, '0:2');
+});
+
+test('buildOpcionesSlot: un emoji personalizado del arma va en el campo emoji de la opción, nunca embebido en label/description', () => {
+  const cta = ctaFixture({ comp: compConEmojiPersonalizado() });
+  const jugador = inscrito({ roles: ['rockmace'], preferido: 'rockmace' });
+
+  const [opt] = buildOpcionesSlot({ cta, inscrito: jugador, maestria: {}, incluirOcupados: false }).map((o) => o.toJSON());
+
+  assertSinEmojiCrudo([opt]);
+  assert.deepEqual(opt.emoji, { id: '1514416132817000000', name: 'T8_MAIN_ROCKMACE_KEEPER', animated: false });
+  assert.equal(opt.label, '🔵 Party 1 · T8 Rockmace Keeper');
+});
+
+test('buildOpcionesSlot: dos slots del mismo rol en la misma party se desambiguan con "#1"/"#2"', () => {
+  const cta = ctaFixture({
+    comp: {
+      categorias: { tanque: { nombre: 'Tanque', emoji: '🔵', orden: 1 } },
+      roles: { 'maza-pesada': { nombre: 'Maza Pesada', emoji: '🔨', categoria: 'tanque', nota: '' } },
+      parties: [{ nombre: 'Party 1', slots: ['maza-pesada', 'maza-pesada'] }],
+    },
+  });
+  const jugador = inscrito({ roles: ['maza-pesada'], preferido: 'maza-pesada' });
+
+  const opciones = buildOpcionesSlot({ cta, inscrito: jugador, maestria: {}, incluirOcupados: false }).map((o) => o.toJSON());
+
+  assert.equal(opciones.length, 2);
+  assert.notEqual(opciones[0].label, opciones[1].label);
+  assert.match(opciones[0].label, / #1$/);
+  assert.match(opciones[1].label, / #2$/);
+});
+
+test('buildOpcionesSlot: sin colisión (ningún rol repetido en la misma party), ningún label lleva sufijo "#N" de más', () => {
+  const cta = ctaFixture({
+    comp: {
+      categorias: { tanque: { nombre: 'Tanque', emoji: '🔵', orden: 1 }, soporte: { nombre: 'Soporte', emoji: '🟢', orden: 2 } },
+      roles: {
+        'maza-pesada': { nombre: 'Maza Pesada', emoji: '🔨', categoria: 'tanque', nota: '' },
+        santi: { nombre: 'Santi', emoji: '🧪', categoria: 'soporte', nota: '' },
+      },
+      parties: [{ nombre: 'Party 1', slots: ['maza-pesada', 'santi'] }],
+    },
+  });
+  const jugador = inscrito({ roles: ['santi'], preferido: 'santi' });
+  const opciones = buildOpcionesSlot({ cta, inscrito: jugador, maestria: {}, incluirOcupados: false }).map((o) => o.toJSON());
+  assert.equal(opciones.length, 2);
+  for (const opt of opciones) {
+    assert.doesNotMatch(opt.label, /#\d$/);
+  }
+});
+
+test('buildOpcionesSlot: recorta el nombre del arma para no pasar de 100 caracteres, sin tocar el prefijo ni las estrellas', () => {
+  const nombreLargo = 'Arma con un nombre absurdamente largo de verdad '.repeat(3); // > 100 por sí solo
+  const cta = ctaFixture({
+    comp: {
+      categorias: { tanque: { nombre: 'Tanque', emoji: '🔵', orden: 1 } },
+      roles: { arma: { nombre: nombreLargo, emoji: '🔨', categoria: 'tanque', nota: '' } },
+      parties: [{ nombre: 'Party 1', slots: ['arma'] }],
+    },
+  });
+  const jugador = inscrito({ roles: ['arma'], preferido: 'arma' });
+  const maestria = maestriaFixture({ u1: { arma: 30 } }); // nivel 4 -> ★★★★
+
+  const [opt] = buildOpcionesSlot({ cta, inscrito: jugador, maestria, incluirOcupados: false }).map((o) => o.toJSON());
+
+  assert.ok(opt.label.length <= 100, `label de ${opt.label.length} caracteres`);
+  assert.match(opt.label, /★★★★$/); // el sufijo de estrellas sobrevive intacto
+  assert.match(opt.label, /^🔵 Party 1 · /); // el prefijo (categoría + party) sobrevive intacto
+  assert.match(opt.label, /…/); // el nombre del arma se recortó
+});
+
+test('buildOpcionesJugador/buildOpcionesBloqueo: con un rol de emoji personalizado, ningún label ni description lleva "<:" o "<a:"', () => {
+  const cta = ctaFixture({ comp: compConEmojiPersonalizado() });
+  const jugador = inscrito({ roles: ['rockmace'], preferido: 'rockmace' });
+  const maestria = maestriaFixture({ u1: { rockmace: 30 } });
+
+  assertSinEmojiCrudo(buildOpcionesJugador(cta, [jugador], maestria).map((o) => o.toJSON()));
+  assertSinEmojiCrudo(buildOpcionesBloqueo(cta, [jugador], maestria).map((o) => o.toJSON()));
 });
 
 test('buildOpcionesSlot ("Asignar"): nunca ofrece un slot ya ocupado', () => {

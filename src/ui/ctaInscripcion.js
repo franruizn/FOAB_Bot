@@ -2,6 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, 
 import { ordenarRoles } from '../services/ctaComp.js';
 import { nivelEstrellas } from '../services/maestria.js';
 import { ctaButtonCustomId } from './ctaEmbed.js';
+import { emojiParaOpcion } from './emojiOption.js';
 
 const OPTION_LABEL_MAX = 100; // límite real de Discord para el label de una opción de select
 const OPTION_DESCRIPTION_MAX = 100; // ídem para la descripción
@@ -13,20 +14,6 @@ export const CTA_SELECT_SLOT = 'sel-slot';
 export const CTA_BOTON_CONFIRMAR = 'confirmar';
 export const CTA_BOTON_CANCELAR = 'cancelar';
 export const SLOT_SKIP_VALUE = '__sin_asignar__';
-
-const CUSTOM_EMOJI_RESUELTO = /^<(a)?:([a-zA-Z0-9_]{2,32}):(\d{15,21})>$/;
-
-/**
- * Convierte un emoji ya resuelto (string) a la forma que espera
- * StringSelectMenuOptionBuilder#setEmoji: un objeto {id,name,animated} para
- * un custom emoji, o el string unicode tal cual.
- */
-function emojiParaOpcion(emojiStr) {
-  const match = CUSTOM_EMOJI_RESUELTO.exec(emojiStr);
-  if (!match) return emojiStr;
-  const [, animated, name, id] = match;
-  return { id, name, animated: Boolean(animated) };
-}
 
 /**
  * "🔵 Maza Pesada ★★★★": emoji de categoría (texto, delante) + nombre del

@@ -2,6 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, 
 import { nivelEstrellas } from '../services/maestria.js';
 import { truncateList } from './textTruncate.js';
 import { ctaButtonCustomId } from './ctaEmbed.js';
+import { emojiParaOpcion } from './emojiOption.js';
 
 // Panel de asignación del caller (equivalente al tablero drag-and-drop de la
 // web, aquí como selects encadenados). Todo el panel es EFÍMERO: solo lo ve
@@ -163,11 +164,25 @@ export function ordenarPorEscasezDePreferido(cta, inscritos) {
   });
 }
 
-function labelSlot({ party, rol, categoria, estrellas, compatible }) {
-  const prefijoCategoria = categoria ? `${categoria.emoji} ` : '';
+/**
+ * "🟢 Party 1 · Maza Pesada ★★": el emoji de categoría (unicode) SÍ va
+ * inline en el texto porque unicode renderiza igual ahí que en el campo
+ * `emoji`; el del arma NO — ver ui/emojiOption.js. El nombre del arma es lo
+ * único que se recorta para caber en 100 caracteres: el resto (marca,
+ * emoji de categoría, party, estrellas, y el sufijo de desambiguación si
+ * hace falta) se reserva primero como presupuesto fijo.
+ * @param {{ party: object, rol: object, categoria: object | null, estrellas: number, compatible: boolean, sufijoDesambiguacion?: string }} params
+ */
+function labelSlot({ party, rol, categoria, estrellas, compatible, sufijoDesambiguacion = '' }) {
   const marca = compatible ? '' : '⚠️ ';
-  const sufijo = compatible ? estrellasTexto(estrellas) : '';
-  return `${marca}${party.nombre} · ${prefijoCategoria}${rol.emoji} ${rol.nombre}${sufijo}`.slice(0, OPTION_LABEL_MAX);
+  const prefijoCategoria = categoria ? `${categoria.emoji} ` : '';
+  const prefijo = `${marca}${prefijoCategoria}${party.nombre} · `;
+  const sufijo = (compatible ? estrellasTexto(estrellas) : '') + sufijoDesambiguacion;
+
+  const maxNombre = Math.max(0, OPTION_LABEL_MAX - prefijo.length - sufijo.length);
+  const nombre = rol.nombre.length > maxNombre ? `${rol.nombre.slice(0, Math.max(0, maxNombre - 1))}…` : rol.nombre;
+
+  return `${prefijo}${nombre}${sufijo}`;
 }
 
 /**
@@ -176,6 +191,12 @@ function labelSlot({ party, rol, categoria, estrellas, compatible }) {
  * estrellas de ESE jugador en ese rol), incompatibles al final, marcados y
  * sin estrellas — la web los permite igual, por si el caller quiere forzar.
  * Nunca ofrece un slot bloqueado, ni el propio slot actual del jugador.
+ *
+ * Dos slots del mismo rol en la misma party (frecuente: una party con
+ * varios "Maza Pesada") producen el mismo label hasta que se desambiguan
+ * con "#N" — se detecta en dos pasadas: primero se construyen todos los
+ * labels tal cual, y solo a los que colisionan se les añade el sufijo (así
+ * el 95% de las opciones, que no colisionan, no llevan un "#1" de más).
  * @param {object} params
  * @param {object} params.cta
  * @param {object} params.inscrito - a quien se le busca destino
@@ -184,8 +205,7 @@ function labelSlot({ party, rol, categoria, estrellas, compatible }) {
  * @returns {import('discord.js').StringSelectMenuOptionBuilder[]}
  */
 export function buildOpcionesSlot({ cta, inscrito, maestria, incluirOcupados }) {
-  const compatibles = [];
-  const incompatibles = [];
+  const entradas = [];
 
   cta.comp.parties.forEach((party, partyIdx) => {
     party.slots.forEach((rolKey, slotIdx) => {
@@ -201,23 +221,43 @@ export function buildOpcionesSlot({ cta, inscrito, maestria, incluirOcupados }) 
       const compatible = inscrito.roles.includes(rolKey);
       const estrellas = compatible ? nivelEstrellas(maestria, inscrito.userId, rolKey) : 0;
 
-      const option = new StringSelectMenuOptionBuilder()
-        .setValue(key)
-        .setLabel(labelSlot({ party, rol, categoria, estrellas, compatible }));
-
-      if (asignacion) {
-        const ocupante = cta.inscritos.find((i) => i.userId === asignacion.userId);
-        option.setDescription(
-          `Ocupado por ${truncarNombreJugador(ocupante?.nombre ?? 'alguien')} · se intercambian`.slice(0, OPTION_DESCRIPTION_MAX),
-        );
-      } else {
-        const { total, asignados } = coberturaDeRol(cta, rolKey);
-        option.setDescription(`quedan ${total - asignados} slot(s) de este rol`.slice(0, OPTION_DESCRIPTION_MAX));
-      }
-
-      (compatible ? compatibles : incompatibles).push(option);
+      entradas.push({ key, party, rolKey, rol, categoria, estrellas, compatible, asignacion });
     });
   });
+
+  const veces = new Map(); // label base -> cuántas entradas lo producen
+  for (const e of entradas) {
+    const base = labelSlot(e);
+    veces.set(base, (veces.get(base) ?? 0) + 1);
+  }
+
+  const contador = new Map(); // label base -> cuántas ya se han desambiguado
+  const compatibles = [];
+  const incompatibles = [];
+
+  for (const e of entradas) {
+    const base = labelSlot(e);
+    let label = base;
+    if (veces.get(base) > 1) {
+      const n = (contador.get(base) ?? 0) + 1;
+      contador.set(base, n);
+      label = labelSlot({ ...e, sufijoDesambiguacion: ` #${n}` });
+    }
+
+    const option = new StringSelectMenuOptionBuilder().setValue(e.key).setLabel(label).setEmoji(emojiParaOpcion(e.rol.emoji));
+
+    if (e.asignacion) {
+      const ocupante = cta.inscritos.find((i) => i.userId === e.asignacion.userId);
+      option.setDescription(
+        `Ocupado por ${truncarNombreJugador(ocupante?.nombre ?? 'alguien')} · se intercambian`.slice(0, OPTION_DESCRIPTION_MAX),
+      );
+    } else {
+      const { total, asignados } = coberturaDeRol(cta, e.rolKey);
+      option.setDescription(`quedan ${total - asignados} slot(s) de este rol`.slice(0, OPTION_DESCRIPTION_MAX));
+    }
+
+    (e.compatible ? compatibles : incompatibles).push(option);
+  }
 
   return [...compatibles, ...incompatibles];
 }
