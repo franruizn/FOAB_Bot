@@ -8,13 +8,14 @@ import * as cta from './commands/cta.js';
 import * as maestria from './commands/maestria.js';
 import * as health from './commands/health.js';
 import * as sorteo from './commands/sorteo.js';
+import * as crearRol from './commands/crearRol.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
 import { ensureSquadsConfig } from './dataPaths.js';
 import { waitForPendingWrites } from './services/squadsStore.js';
 import { waitForPendingRaffleWrites } from './services/rafflesStore.js';
 import { waitForPendingCtaWrites } from './services/ctaStore.js';
 import { notifyUncontrolledError } from './logChannel.js';
-import { initializeRaffles } from './raffleScheduler.js';
+import { initializeRaffles, handleRaffleReactionAdd } from './raffleScheduler.js';
 import { initializeCtaTimers } from './ctaScheduler.js';
 import { flushPendingEmbedRefreshes } from './ctaEmbedSync.js';
 import { validarCredenciales } from './services/sheets.js';
@@ -63,7 +64,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, comp, cta, maestria, health, sorteo]) {
+for (const command of [getkills, squads, attendance, comp, cta, maestria, health, sorteo, crearRol]) {
   client.commands.set(command.data.name, command);
 }
 
@@ -159,6 +160,12 @@ function logComponentInteraction({ interaction, kind, durationMs, result, error 
   if (error) entry.error = error instanceof Error ? error.message : String(error);
   console.log(JSON.stringify(entry));
 }
+
+client.on(Events.MessageReactionAdd, (reaction, user) => {
+  handleRaffleReactionAdd(reaction, user).catch((error) => {
+    console.error('[raffle] Error procesando messageReactionAdd:', error?.stack ?? error);
+  });
+});
 
 let isShuttingDown = false;
 

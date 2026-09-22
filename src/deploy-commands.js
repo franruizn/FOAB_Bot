@@ -8,6 +8,7 @@ import { data as ctaCommand } from './commands/cta.js';
 import { data as maestriaCommand } from './commands/maestria.js';
 import { data as healthCommand } from './commands/health.js';
 import { data as sorteoCommand } from './commands/sorteo.js';
+import { data as crearRolCommand } from './commands/crearRol.js';
 
 const VALID_SCOPES = new Set(['guild', 'global', 'clean']);
 // Acepta el modo como argumento CLI (para que los scripts de package.json
@@ -49,6 +50,7 @@ try {
       maestriaCommand,
       healthCommand,
       sorteoCommand,
+      crearRolCommand,
     ].map((command) => command.toJSON());
 
     if (DEPLOY_SCOPE === 'guild') {
