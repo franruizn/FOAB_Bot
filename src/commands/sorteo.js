@@ -22,6 +22,12 @@ export const data = new SlashCommandBuilder()
       .setRequired(true)
       .setMinValue(MIN_MINUTES)
       .setMaxValue(MAX_MINUTES),
+  )
+  .addRoleOption((option) =>
+    option
+      .setName('rol')
+      .setDescription('Restringe la participación a los miembros de este rol (opcional)')
+      .setRequired(false),
   );
 
 /**
@@ -48,6 +54,17 @@ export async function execute(interaction) {
     return;
   }
 
+  const requiredRole = interaction.options.getRole('rol');
+  // El rol @everyone tiene el mismo id que el guild: pasarlo como filtro
+  // equivale a no filtrar nada, y solo confundiría al leer el anuncio.
+  if (requiredRole && requiredRole.id === interaction.guildId) {
+    await interaction.reply({
+      embeds: [errorEmbed('Rol inválido', 'No puedes usar @everyone como rol del sorteo: equivale a no restringir la participación.')],
+      ephemeral: true,
+    });
+    return;
+  }
+
   const existingRaffles = await loadRaffles(RAFFLES_PATH);
   if (existingRaffles.some((raffle) => raffle.channelId === interaction.channelId)) {
     await interaction.reply({
@@ -60,13 +77,22 @@ export async function execute(interaction) {
   await interaction.reply({ content: 'Sorteo creado.', ephemeral: true });
 
   const endsAt = Date.now() + minutes * 60_000;
+  const requiredRoleId = requiredRole?.id ?? null;
   const content = buildRaffleAnnouncementContent({
     creatorId: interaction.user.id,
     endsAtUnixSeconds: Math.floor(endsAt / 1000),
     roleId: process.env.RAFFLE_ROLE_ID || null,
+    requiredRoleId,
   });
 
-  const message = await interaction.channel.send(content);
+  // Sin allowedMentions explícito, discord.js renderiza la mención de rol
+  // pero no siempre la notifica; con rol restrictivo esa mención es la única
+  // pista visible de a quién va dirigido el sorteo, así que se fuerza aquí.
+  const pingRoleId = requiredRoleId ?? (process.env.RAFFLE_ROLE_ID || null);
+  const message = await interaction.channel.send({
+    content,
+    allowedMentions: { roles: pingRoleId ? [pingRoleId] : [] },
+  });
   await message.react('🎉');
 
   const raffle = {
@@ -76,6 +102,7 @@ export async function execute(interaction) {
     messageId: message.id,
     endsAt,
     creatorId: interaction.user.id,
+    roleId: requiredRoleId,
   };
 
   await addRaffle(RAFFLES_PATH, raffle);

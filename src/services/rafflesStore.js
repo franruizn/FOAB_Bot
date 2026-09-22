@@ -46,7 +46,7 @@ async function atomicWrite(filePath, data) {
  * garantiza que siempre se lee o el fichero anterior completo o el nuevo
  * completo, nunca un estado a medias.
  * @param {string} filePath
- * @returns {Promise<Array<{id: string, guildId: string, channelId: string, messageId: string, endsAt: number, creatorId: string}>>}
+ * @returns {Promise<Array<{id: string, guildId: string, channelId: string, messageId: string, endsAt: number, creatorId: string, roleId?: string | null}>>}
  */
 export async function loadRaffles(filePath) {
   return readRafflesFile(filePath);
@@ -63,7 +63,7 @@ async function mutateRaffles(filePath, mutateFn) {
 
 /**
  * @param {string} filePath
- * @param {{id: string, guildId: string, channelId: string, messageId: string, endsAt: number, creatorId: string}} raffle
+ * @param {{id: string, guildId: string, channelId: string, messageId: string, endsAt: number, creatorId: string, roleId?: string | null}} raffle
  */
 export async function addRaffle(filePath, raffle) {
   return mutateRaffles(filePath, (raffles) => [...raffles, raffle]);

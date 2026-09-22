@@ -32,6 +32,39 @@ async function fetchAllReactors(reaction) {
   return [...collected.values()].filter((user) => !user.bot);
 }
 
+/**
+ * Filtra `users` a quienes tengan `roleId` en el guild AHORA MISMO (no en el
+ * momento en que reaccionaron): alguien pudo perder el rol durante el
+ * sorteo, y dejarlo ganar sin tenerlo ya sería un bug visible. Quien se fue
+ * del servidor (members.fetch falla) queda descartado sin reventar.
+ * @param {import('discord.js').Client} client
+ * @param {string} guildId
+ * @param {string} roleId
+ * @param {import('discord.js').User[]} users
+ * @returns {Promise<{ valid: import('discord.js').User[], roleMissing: boolean }>}
+ */
+async function filterByRole(client, guildId, roleId, users) {
+  if (users.length === 0) return { valid: [], roleMissing: false };
+
+  let guild;
+  try {
+    guild = await client.guilds.fetch(guildId);
+  } catch (error) {
+    console.error(`[raffle] No se pudo obtener el guild ${guildId} para filtrar por rol:`, error?.message ?? error);
+    return { valid: [], roleMissing: true };
+  }
+
+  const role = await guild.roles.fetch(roleId).catch(() => null);
+  if (!role) return { valid: [], roleMissing: true };
+
+  const valid = [];
+  for (const user of users) {
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    if (member?.roles.cache.has(roleId)) valid.push(user);
+  }
+  return { valid, roleMissing: false };
+}
+
 function rollParticipants(users) {
   return users.map((user) => ({ user, roll: crypto.randomInt(1, 101) }));
 }
@@ -75,7 +108,7 @@ function applyTiebreak(results) {
  * sitio — y como Message.toString() devuelve message.content, el mensaje
  * final citaba el anuncio entero en vez de mencionar al creador).
  * @param {import('discord.js').Client} client
- * @param {{ id: string, channelId: string, messageId: string, creatorId: string }} raffle
+ * @param {{ id: string, guildId: string, channelId: string, messageId: string, creatorId: string, roleId?: string | null }} raffle
  * @param {{ delayed?: boolean }} [options]
  */
 export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
@@ -103,19 +136,30 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
   }
 
   const reaction = message.reactions.cache.get(RAFFLE_EMOJI);
-  const participants = reaction ? await fetchAllReactors(reaction) : [];
+  const reactors = reaction ? await fetchAllReactors(reaction) : [];
+
+  let participants = reactors;
+  let roleMissing = false;
+  if (raffle.roleId) {
+    const filtered = await filterByRole(client, raffle.guildId, raffle.roleId, reactors);
+    participants = filtered.valid;
+    roleMissing = filtered.roleMissing;
+  }
 
   const reply = { messageReference: raffle.messageId };
 
   if (participants.length === 0) {
-    await channel.send({ embeds: [buildNoParticipantsEmbed({ delayed })], reply });
+    await channel.send({
+      embeds: [buildNoParticipantsEmbed({ delayed, totalReactors: reactors.length, roleMissing })],
+      reply,
+    });
     await removeRaffle(RAFFLES_PATH, raffle.id);
     return;
   }
 
   const { sorted, tiebreak } = applyTiebreak(rollParticipants(participants));
   const winner = sorted[0];
-  const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak });
+  const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak, totalReactors: reactors.length });
   await channel.send({ content: `<@${winner.user.id}> ha ganado el sorteo de <@${raffle.creatorId}>`, embeds: [embed], reply });
 
   await removeRaffle(RAFFLES_PATH, raffle.id);
@@ -159,4 +203,47 @@ export async function initializeRaffles(client) {
       scheduleRaffleResolution(client, raffle);
     }
   }
+}
+
+/**
+ * Aviso en tiempo real (mejor esfuerzo, no la fuente de verdad): si alguien
+ * reacciona a un sorteo con rol y no lo tiene, se le quita la reacción al
+ * momento en vez de dejar que se entere al final. Solo actúa si el bot tiene
+ * "Gestionar mensajes" en ese canal; sin el permiso no hace nada, porque el
+ * filtrado de verdad ocurre en resolveRaffle() al resolver — un evento de
+ * reacción que se pierde en un reinicio no debe dejar colarse a nadie, así
+ * que esta función nunca es la única barrera.
+ * @param {import('discord.js').MessageReaction} reaction
+ * @param {import('discord.js').User} user
+ */
+export async function handleRaffleReactionAdd(reaction, user) {
+  if (user.bot) return;
+
+  try {
+    if (reaction.partial) await reaction.fetch();
+    if (reaction.message.partial) await reaction.message.fetch();
+  } catch (error) {
+    console.error('[raffle] No se pudo completar una reacción parcial:', error?.message ?? error);
+    return;
+  }
+
+  if (reaction.emoji.name !== RAFFLE_EMOJI) return;
+
+  const raffles = await loadRaffles(RAFFLES_PATH);
+  const raffle = raffles.find((r) => r.messageId === reaction.message.id);
+  if (!raffle?.roleId) return;
+
+  const guild = reaction.message.guild;
+  if (!guild) return;
+
+  const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+  const channel = reaction.message.channel;
+  if (!me || !channel?.permissionsFor?.(me)?.has('ManageMessages')) return;
+
+  const member = await guild.members.fetch(user.id).catch(() => null);
+  if (member?.roles.cache.has(raffle.roleId)) return;
+
+  await reaction.users.remove(user.id).catch((error) => {
+    console.error(`[raffle] No se pudo quitar la reacción de ${user.id} en el sorteo ${raffle.id}:`, error?.stack ?? error);
+  });
 }

@@ -82,16 +82,51 @@ class FakeChannel {
   }
 }
 
-function makeFakeClient(channelsById) {
+function makeFakeClient(channelsById, guildsById = new Map()) {
   return {
     channels: {
       fetch: async (id) => channelsById.get(id) ?? Promise.reject(new Error(`unknown channel ${id}`)),
+    },
+    guilds: {
+      fetch: async (id) => guildsById.get(id) ?? Promise.reject(new Error(`unknown guild ${id}`)),
     },
   };
 }
 
 function lastContent(channel) {
   return channel.sentPayloads.at(-1)?.content;
+}
+
+function lastEmbed(channel) {
+  return channel.sentPayloads.at(-1)?.embeds[0].toJSON();
+}
+
+// Dobles para el filtrado por rol: un guild con roles y miembros, con
+// duck-typing (solo lo que filterByRole()/handleRaffleReactionAdd() llaman).
+
+class FakeGuildMember {
+  constructor(id, roleIds = []) {
+    this.id = id;
+    this.roles = { cache: new Set(roleIds) };
+  }
+}
+
+class FakeGuild {
+  constructor(id, { roleIds = [], membersById = new Map() } = {}) {
+    this.id = id;
+    this._roleIds = new Set(roleIds);
+    this._membersById = membersById;
+    this.roles = {
+      fetch: async (roleId) => (this._roleIds.has(roleId) ? { id: roleId } : null),
+    };
+    this.members = {
+      fetch: async (userId) => {
+        const member = this._membersById.get(userId);
+        if (!member) throw new Error(`Unknown Member ${userId}`);
+        return member;
+      },
+    };
+  }
 }
 
 // ============================================================
@@ -230,4 +265,176 @@ test('initializeRaffles(): un sorteo que sigue vivo se reprograma y, al vencer, 
   const content = lastContent(channel);
   assert.match(content, /^<@p1> ha ganado el sorteo de <@creator-6>$/);
   assert.doesNotMatch(content, /undefined/);
+});
+
+// ============================================================
+// resolveRaffle() con raffle.roleId: filtrado por rol al resolver
+// ============================================================
+
+test('resolveRaffle(): con rol, solo quienes lo tienen entran en las tiradas (y el footer lo cuenta)', async () => {
+  const CHANNEL_ID = 'channel-role-1';
+  const GUILD_ID = 'guild-role-1';
+  const ROLE_ID = 'role-1';
+  const channel = new FakeChannel(CHANNEL_ID);
+  // p1 y p2 tienen el rol; p3 reaccionó pero no lo tiene.
+  const guild = new FakeGuild(GUILD_ID, {
+    roleIds: [ROLE_ID],
+    membersById: new Map([
+      ['p1', new FakeGuildMember('p1', [ROLE_ID])],
+      ['p2', new FakeGuildMember('p2', [ROLE_ID])],
+      ['p3', new FakeGuildMember('p3', [])],
+    ]),
+  });
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]), new Map([[GUILD_ID, guild]]));
+
+  const announcement = new FakeMessage('msg-role-1', 'anuncio');
+  announcement.addReaction('🎉', [new FakeUser('p1'), new FakeUser('p2'), new FakeUser('p3')]);
+  channel.store.set(announcement.id, announcement);
+
+  const raffle = { id: 'raffle-role-1', guildId: GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-1', roleId: ROLE_ID };
+  await resolveRaffle(client, raffle);
+
+  const content = lastContent(channel);
+  assert.match(content, /^<@(p1|p2)> ha ganado el sorteo de <@creator-1>$/, 'el ganador debe tener el rol');
+
+  const embed = lastEmbed(channel);
+  assert.match(embed.footer.text, /2 de 3 participantes válidos/);
+});
+
+test('resolveRaffle(): un usuario que perdió el rol durante el sorteo queda descartado', async () => {
+  const CHANNEL_ID = 'channel-role-2';
+  const GUILD_ID = 'guild-role-2';
+  const ROLE_ID = 'role-2';
+  const channel = new FakeChannel(CHANNEL_ID);
+  // p2 reaccionó cuando tenía el rol, pero ya no lo tiene al resolver.
+  const guild = new FakeGuild(GUILD_ID, {
+    roleIds: [ROLE_ID],
+    membersById: new Map([
+      ['p1', new FakeGuildMember('p1', [ROLE_ID])],
+      ['p2', new FakeGuildMember('p2', [])],
+    ]),
+  });
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]), new Map([[GUILD_ID, guild]]));
+
+  const announcement = new FakeMessage('msg-role-2', 'anuncio');
+  announcement.addReaction('🎉', [new FakeUser('p1'), new FakeUser('p2')]);
+  channel.store.set(announcement.id, announcement);
+
+  const raffle = { id: 'raffle-role-2', guildId: GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-2', roleId: ROLE_ID };
+  await resolveRaffle(client, raffle);
+
+  const content = lastContent(channel);
+  assert.match(content, /^<@p1> ha ganado el sorteo de <@creator-2>$/, 'p2 ya no tiene el rol y no debe poder ganar');
+});
+
+test('resolveRaffle(): un usuario que se fue del servidor queda descartado sin fallar', async () => {
+  const CHANNEL_ID = 'channel-role-3';
+  const GUILD_ID = 'guild-role-3';
+  const ROLE_ID = 'role-3';
+  const channel = new FakeChannel(CHANNEL_ID);
+  // p2 reaccionó pero ya no está en el guild: members.fetch('p2') rechaza.
+  const guild = new FakeGuild(GUILD_ID, {
+    roleIds: [ROLE_ID],
+    membersById: new Map([['p1', new FakeGuildMember('p1', [ROLE_ID])]]),
+  });
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]), new Map([[GUILD_ID, guild]]));
+
+  const announcement = new FakeMessage('msg-role-3', 'anuncio');
+  announcement.addReaction('🎉', [new FakeUser('p1'), new FakeUser('p2')]);
+  channel.store.set(announcement.id, announcement);
+
+  const raffle = { id: 'raffle-role-3', guildId: GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-3', roleId: ROLE_ID };
+  await assert.doesNotReject(resolveRaffle(client, raffle));
+
+  const content = lastContent(channel);
+  assert.match(content, /^<@p1> ha ganado el sorteo de <@creator-3>$/);
+});
+
+test('resolveRaffle(): con rol, si nadie de los que reaccionaron lo tiene, lo dice explícitamente (no es un sorteo vacío)', async () => {
+  const CHANNEL_ID = 'channel-role-4';
+  const GUILD_ID = 'guild-role-4';
+  const ROLE_ID = 'role-4';
+  const channel = new FakeChannel(CHANNEL_ID);
+  const guild = new FakeGuild(GUILD_ID, {
+    roleIds: [ROLE_ID],
+    membersById: new Map([
+      ['p1', new FakeGuildMember('p1', [])],
+      ['p2', new FakeGuildMember('p2', [])],
+    ]),
+  });
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]), new Map([[GUILD_ID, guild]]));
+
+  const announcement = new FakeMessage('msg-role-4', 'anuncio');
+  announcement.addReaction('🎉', [new FakeUser('p1'), new FakeUser('p2')]);
+  channel.store.set(announcement.id, announcement);
+
+  const raffle = { id: 'raffle-role-4', guildId: GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-4', roleId: ROLE_ID };
+  await resolveRaffle(client, raffle);
+
+  const payload = channel.sentPayloads.at(-1);
+  assert.equal(payload.content, undefined, 'sin ganador no hay texto plano con menciones');
+  assert.match(payload.embeds[0].toJSON().description, /2 persona\(s\) reaccionaron, pero ninguna cumplía el rol requerido/);
+});
+
+test('resolveRaffle(): si el rol se borró antes de resolver, resuelve sin participantes y lo explica sin reventar', async () => {
+  const CHANNEL_ID = 'channel-role-5';
+  const GUILD_ID = 'guild-role-5';
+  const ROLE_ID = 'role-deleted';
+  const channel = new FakeChannel(CHANNEL_ID);
+  // El guild existe, pero el rol ya no está entre sus roles.
+  const guild = new FakeGuild(GUILD_ID, { roleIds: [], membersById: new Map([['p1', new FakeGuildMember('p1', [])]]) });
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]), new Map([[GUILD_ID, guild]]));
+
+  const announcement = new FakeMessage('msg-role-5', 'anuncio');
+  announcement.addReaction('🎉', [new FakeUser('p1')]);
+  channel.store.set(announcement.id, announcement);
+
+  const raffle = { id: 'raffle-role-5', guildId: GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-5', roleId: ROLE_ID };
+  await assert.doesNotReject(resolveRaffle(client, raffle));
+
+  const payload = channel.sentPayloads.at(-1);
+  assert.equal(payload.content, undefined);
+  assert.match(payload.embeds[0].toJSON().description, /el rol requerido para este sorteo ya no existe/i);
+});
+
+// ============================================================
+// initializeRaffles() con roleId: un sorteo reanudado tras un reinicio
+// sigue filtrando por el mismo rol
+// ============================================================
+
+test('initializeRaffles(): un sorteo con rol reanudado tras un reinicio sigue filtrando por ese rol', async () => {
+  const CHANNEL_ID = 'channel-role-6';
+  const GUILD_ID = 'guild-role-6';
+  const ROLE_ID = 'role-6';
+  const channel = new FakeChannel(CHANNEL_ID);
+  const guild = new FakeGuild(GUILD_ID, {
+    roleIds: [ROLE_ID],
+    membersById: new Map([
+      ['p1', new FakeGuildMember('p1', [ROLE_ID])],
+      ['p2', new FakeGuildMember('p2', [])],
+    ]),
+  });
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]), new Map([[GUILD_ID, guild]]));
+
+  const announcement = new FakeMessage('msg-role-6', 'anuncio');
+  announcement.addReaction('🎉', [new FakeUser('p1'), new FakeUser('p2')]);
+  channel.store.set(announcement.id, announcement);
+
+  // Plazo ya vencido: se resuelve de inmediato al "reiniciar", como si el
+  // bot hubiera estado caído.
+  const raffle = {
+    id: 'raffle-role-6',
+    guildId: GUILD_ID,
+    channelId: CHANNEL_ID,
+    messageId: announcement.id,
+    endsAt: Date.now() - 1000,
+    creatorId: 'creator-6',
+    roleId: ROLE_ID,
+  };
+  await addRaffle(RAFFLES_PATH, raffle);
+
+  await initializeRaffles(client);
+
+  const content = lastContent(channel);
+  assert.match(content, /^<@p1> ha ganado el sorteo de <@creator-6>$/, 'p2 no tiene el rol y no debe poder ganar tras el reinicio');
 });
