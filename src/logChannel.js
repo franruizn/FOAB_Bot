@@ -88,6 +88,37 @@ export async function notifyCtaSheetDesync(client, { ctaId, ctaNombre, error }) 
 }
 
 /**
+ * Notifica en LOG_CHANNEL_ID (si está configurado) que /crear-rol creó un
+ * rol nuevo y a quiénes se lo asignó (o falló al asignar).
+ * @param {import('discord.js').Client} client
+ * @param {{ actorTag: string, roleMention: string, assignedCount: number, totalResolved: number, unresolved: string[], failedMentions: string[] }} params
+ */
+export async function notifyRoleCreation(
+  client,
+  { actorTag, roleMention, assignedCount, totalResolved, unresolved, failedMentions },
+) {
+  const lines = [`Asignado a **${assignedCount}** de ${totalResolved} persona(s) resuelta(s).`];
+  if (unresolved.length > 0) {
+    lines.push(`No resueltos: ${unresolved.map((token) => `\`${token}\``).join(', ')}`);
+  }
+  if (failedMentions.length > 0) {
+    lines.push(`Fallo al asignar: ${failedMentions.join(', ')}`);
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(MUTATION_COLOR)
+    .setTitle('🆕 /crear-rol creó un rol')
+    .setDescription(lines.join('\n'))
+    .addFields(
+      { name: 'Oficial', value: actorTag, inline: true },
+      { name: 'Rol', value: roleMention, inline: true },
+    )
+    .setTimestamp(new Date());
+
+  await sendToLogChannel(client, embed);
+}
+
+/**
  * Notifica en LOG_CHANNEL_ID (si está configurado) que un comando falló con
  * un error no controlado (no un InvalidLinkError/AlbionApiError/etc. con
  * mensaje propio, sino algo inesperado que merece revisión).

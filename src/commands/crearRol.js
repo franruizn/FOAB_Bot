@@ -4,6 +4,7 @@ import { errorEmbed } from '../ui/errorEmbed.js';
 import { buildCrearRolPreviewEmbed, buildCrearRolResultEmbed } from '../ui/crearRolEmbed.js';
 import { resolveMentionList } from '../services/mentionList.js';
 import { verificarPrerequisitosDeRol, CtaRoleError } from '../services/ctaRole.js';
+import { notifyRoleCreation } from '../logChannel.js';
 
 const CONFIRM_TIMEOUT_MS = 60_000;
 const ROLE_NAME_MAX_LENGTH = 100; // límite real de Discord para el nombre de un rol
@@ -154,17 +155,28 @@ export async function execute(interaction) {
     }
   }
 
+  const assignedCount = resolved.length - failedMentions.length;
+
   await buttonInteraction.editReply({
     content: null,
     embeds: [
       buildCrearRolResultEmbed({
         roleMention: `<@&${role.id}>`,
-        assignedCount: resolved.length - failedMentions.length,
+        assignedCount,
         totalResolved: resolved.length,
         unresolved,
         failedMentions,
       }),
     ],
     components: [],
+  });
+
+  await notifyRoleCreation(interaction.client, {
+    actorTag: interaction.user.tag,
+    roleMention: `<@&${role.id}>`,
+    assignedCount,
+    totalResolved: resolved.length,
+    unresolved,
+    failedMentions,
   });
 }
