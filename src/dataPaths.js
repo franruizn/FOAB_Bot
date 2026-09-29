@@ -17,6 +17,8 @@ export const CTA_COMPS_PATH = path.join(DATA_DIR, 'comps.json');
 // Fuente de verdad de la maestría por (jugador, rol): cuántas veces cerró
 // una CTA con esa persona asignada a ese rol (ver services/maestria.js).
 export const MAESTRIA_PATH = path.join(DATA_DIR, 'maestria.json');
+// Estado de /dm: cooldown y el envío en curso (ver services/massDm.js).
+export const DM_STATE_PATH = path.join(DATA_DIR, 'dm.json');
 
 /**
  * Garantiza que DATA_DIR y squads.json existan antes de que el bot atienda

@@ -9,16 +9,19 @@ import * as maestria from './commands/maestria.js';
 import * as health from './commands/health.js';
 import * as sorteo from './commands/sorteo.js';
 import * as crearRol from './commands/crearRol.js';
+import * as dm from './commands/dm.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
 import { ensureSquadsConfig } from './dataPaths.js';
 import { waitForPendingWrites } from './services/squadsStore.js';
 import { waitForPendingRaffleWrites } from './services/rafflesStore.js';
 import { waitForPendingCtaWrites } from './services/ctaStore.js';
-import { notifyUncontrolledError } from './logChannel.js';
+import { notifyUncontrolledError, notifyDmInterrupted } from './logChannel.js';
 import { initializeRaffles, handleRaffleReactionAdd } from './raffleScheduler.js';
 import { initializeCtaTimers } from './ctaScheduler.js';
 import { flushPendingEmbedRefreshes } from './ctaEmbedSync.js';
 import { validarCredenciales } from './services/sheets.js';
+import { takeInterruptedDmSend, waitForPendingDmWrites } from './services/massDm.js';
+import { DM_STATE_PATH } from './dataPaths.js';
 
 const { DISCORD_TOKEN } = process.env;
 
@@ -64,7 +67,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, comp, cta, maestria, health, sorteo, crearRol]) {
+for (const command of [getkills, squads, attendance, comp, cta, maestria, health, sorteo, crearRol, dm]) {
   client.commands.set(command.data.name, command);
 }
 
@@ -79,6 +82,17 @@ client.once(Events.ClientReady, async (readyClient) => {
     await initializeCtaTimers(readyClient);
   } catch (error) {
     console.error('[cta] Error inicializando las CTAs activas:', error?.stack ?? error);
+  }
+  try {
+    // Un /dm cortado por el reinicio NO se reanuda (reenviar a quien ya lo
+    // recibió es peor que no enviar): solo se avisa de cuántos salieron.
+    const interrumpido = await takeInterruptedDmSend(DM_STATE_PATH);
+    if (interrumpido) {
+      console.warn(`[dm] Envío interrumpido: ${interrumpido.sentIds.length}/${interrumpido.total} enviados. No se reanuda.`);
+      await notifyDmInterrupted(readyClient, interrumpido);
+    }
+  } catch (error) {
+    console.error('[dm] Error comprobando envíos interrumpidos:', error?.stack ?? error);
   }
   try {
     // validarCredenciales() nunca lanza (su resultado ES la respuesta): esto
@@ -254,7 +268,7 @@ async function shutdown(signal) {
     await flushPendingEmbedRefreshes();
     // Espera cualquier escritura de squads.json, raffles.json o cta.json ya
     // en curso (tmp + rename) antes de desconectar, para no cortarla a mitad.
-    await Promise.all([waitForPendingWrites(), waitForPendingRaffleWrites(), waitForPendingCtaWrites()]);
+    await Promise.all([waitForPendingWrites(), waitForPendingRaffleWrites(), waitForPendingCtaWrites(), waitForPendingDmWrites()]);
   } catch (error) {
     console.error('[shutdown] Error esperando escrituras pendientes:', error?.stack ?? error);
   }

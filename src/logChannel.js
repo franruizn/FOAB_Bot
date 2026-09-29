@@ -1,9 +1,9 @@
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder, AttachmentBuilder } from 'discord.js';
 
 const MUTATION_COLOR = 0x5865f2;
 const ERROR_COLOR = 0xed4245;
 
-async function sendToLogChannel(client, embed) {
+async function sendToLogChannel(client, embed, files = []) {
   const channelId = process.env.LOG_CHANNEL_ID;
   if (!channelId) return; // opcional: sin configurar, no hace nada
 
@@ -13,7 +13,7 @@ async function sendToLogChannel(client, embed) {
       console.error(`[logChannel] LOG_CHANNEL_ID (${channelId}) no resuelve a un canal de texto.`);
       return;
     }
-    await channel.send({ embeds: [embed] });
+    await channel.send({ embeds: [embed], files });
   } catch (error) {
     // Nunca debe romper el flujo del comando que la disparó.
     console.error('[logChannel] No se pudo enviar al canal de logs:', error.stack ?? error);
@@ -138,4 +138,94 @@ export async function notifyUncontrolledError(client, { commandName, actorTag, e
     .setTimestamp(new Date());
 
   await sendToLogChannel(client, embed);
+}
+
+// Por encima de esto el texto de un /dm no cabe en la descripción de un
+// embed (4096) junto con el resto: se adjunta como fichero.
+const DM_LOG_TEXT_MAX_LENGTH = 4000;
+
+/**
+ * Notifica en LOG_CHANNEL_ID (si está configurado) que alguien que NO es
+ * DM_OWNER_ID intentó usar /dm.
+ * @param {import('discord.js').Client} client
+ * @param {{ actorTag: string, actorId: string }} params
+ */
+export async function notifyDmUnauthorized(client, { actorTag, actorId }) {
+  const embed = new EmbedBuilder()
+    .setColor(ERROR_COLOR)
+    .setTitle('🚫 Intento de /dm sin permiso')
+    .setDescription(`<@${actorId}> intentó usar /dm y no es DM_OWNER_ID. No se envió nada.`)
+    .addFields(
+      { name: 'Usuario', value: actorTag, inline: true },
+      { name: 'ID', value: actorId, inline: true },
+    )
+    .setTimestamp(new Date());
+
+  await sendToLogChannel(client, embed);
+}
+
+/**
+ * Rastro de cada /dm, ANTES de empezar a enviar (para que quede aunque el
+ * bot se caiga a mitad): quién, a cuántos, el texto completo tal y como lo
+ * reciben (cabecera incluida) y la hora (el timestamp del embed).
+ * @param {import('discord.js').Client} client
+ * @param {{ actorTag: string, actorId: string, total: number, content: string }} params
+ */
+export async function notifyDmStarted(client, { actorTag, actorId, total, content }) {
+  const fitsInEmbed = content.length <= DM_LOG_TEXT_MAX_LENGTH;
+  const embed = new EmbedBuilder()
+    .setColor(MUTATION_COLOR)
+    .setTitle('📨 /dm: envío iniciado')
+    .setDescription(fitsInEmbed ? content : 'El texto no cabe en un embed: va adjunto como fichero.')
+    .addFields(
+      { name: 'Remitente', value: `${actorTag} (<@${actorId}>)`, inline: true },
+      { name: 'Destinatarios', value: String(total), inline: true },
+    )
+    .setTimestamp(new Date());
+
+  const files = fitsInEmbed
+    ? []
+    : [new AttachmentBuilder(Buffer.from(content, 'utf8'), { name: `dm-${Date.now()}.txt` })];
+  await sendToLogChannel(client, embed, files);
+}
+
+/**
+ * Resultado de un /dm ya terminado (el texto ya quedó en notifyDmStarted).
+ * @param {import('discord.js').Client} client
+ * @param {{ actorTag: string, summary: string }} params
+ */
+export async function notifyDmFinished(client, { actorTag, summary }) {
+  const embed = new EmbedBuilder()
+    .setColor(MUTATION_COLOR)
+    .setTitle('📨 /dm: envío terminado')
+    .setDescription(summary)
+    .addFields({ name: 'Remitente', value: actorTag, inline: true })
+    .setTimestamp(new Date());
+
+  await sendToLogChannel(client, embed);
+}
+
+/**
+ * Al arrancar: un /dm se quedó a medias (el bot se reinició durante el
+ * envío). NO se reanuda — reenviar a quien ya lo recibió es peor que no
+ * enviar —, solo se deja constancia de cuántos salieron para decidir a mano.
+ * @param {import('discord.js').Client} client
+ * @param {{ actorTag: string, startedAt: number, total: number, sentIds: string[] }} params
+ */
+export async function notifyDmInterrupted(client, { actorTag, startedAt, total, sentIds }) {
+  const embed = new EmbedBuilder()
+    .setColor(ERROR_COLOR)
+    .setTitle('⚠️ /dm interrumpido por un reinicio')
+    .setDescription(
+      `Un /dm de **${actorTag}** iniciado <t:${Math.floor(startedAt / 1000)}:f> se cortó a mitad: ` +
+        `se habían enviado **${sentIds.length}** de ${total}. **No se ha reanudado.** ` +
+        'Decide a mano si hace falta mandarlo al resto.',
+    )
+    .setTimestamp(new Date());
+
+  const files =
+    sentIds.length > 0
+      ? [new AttachmentBuilder(Buffer.from(sentIds.join('\n'), 'utf8'), { name: `dm-enviados-${startedAt}.txt` })]
+      : [];
+  await sendToLogChannel(client, embed, files);
 }
