@@ -25,8 +25,8 @@ test('buildRaffleAnnouncementContent(): con rol restrictivo, menciona solo ESE r
   });
   assert.equal(
     content,
-    '<@creator-1> ha comenzado un sorteo para <@&party-role> que terminará <t:123:R>.\n' +
-      'Solo pueden participar los miembros de <@&party-role>. Reacciona para participar.',
+    '<@&party-role> <@creator-1> ha comenzado un sorteo que terminará <t:123:R>.\n\n' +
+      'Reacciona con 🎉 para participar (solo miembros de <@&party-role>).',
   );
   assert.doesNotMatch(content, /raffle-role/, 'no debe pingear el rol de RAFFLE_ROLE_ID cuando hay un rol restrictivo');
 });

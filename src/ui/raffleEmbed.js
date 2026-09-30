@@ -14,17 +14,12 @@ const ROLLS_FIELD_MAX = 1020;
  * @param {{ creatorId: string, endsAtUnixSeconds: number, roleId?: string | null, requiredRoleId?: string | null }} params
  */
 export function buildRaffleAnnouncementContent({ creatorId, endsAtUnixSeconds, roleId, requiredRoleId }) {
-  if (requiredRoleId) {
-    return (
-      `<@${creatorId}> ha comenzado un sorteo para <@&${requiredRoleId}> que terminará <t:${endsAtUnixSeconds}:R>.\n` +
-      `Solo pueden participar los miembros de <@&${requiredRoleId}>. Reacciona para participar.`
-    );
-  }
-
-  const rolePing = roleId ? `<@&${roleId}> ` : '';
+  const pingRoleId = requiredRoleId ?? roleId;
+  const rolePing = pingRoleId ? `<@&${pingRoleId}> ` : '';
+  const restriction = requiredRoleId ? ` (solo miembros de <@&${requiredRoleId}>)` : '';
   return (
     `${rolePing}<@${creatorId}> ha comenzado un sorteo que terminará <t:${endsAtUnixSeconds}:R>.\n\n` +
-    `Reacciona con 🎉 para participar.`
+    `Reacciona con 🎉 para participar${restriction}.`
   );
 }
 
