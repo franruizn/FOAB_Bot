@@ -189,7 +189,7 @@ test('/dm: 200 destinatarios exactos sí se permite', async () => {
   assert.equal(interaction._progressEdits.length, 8);
 });
 
-test('/dm: lista con <@id> y @nombre mezclados resuelve ambos; bots saltados; cabecera fija', async () => {
+test('/dm: lista con <@id> y @nombre mezclados resuelve ambos; bots saltados; llega solo lo escrito', async () => {
   const members = new Map([
     ['111', makeMember('111', 'uno')],
     ['222', makeMember('222', 'dos')],
@@ -199,7 +199,7 @@ test('/dm: lista con <@id> y @nombre mezclados resuelve ambos; bots saltados; ca
 
   await execute(interaction);
 
-  const expected = '📨 Remitente te envía este mensaje desde **FOAB**:\n\nMensaje de prueba';
+  const expected = 'Mensaje de prueba';
   assert.deepEqual(members.get('111')._received.map((p) => p.content), [expected]);
   assert.deepEqual(members.get('222')._received.map((p) => p.content), [expected]);
   assert.equal(members.get('333')._received.length, 0, 'los bots no reciben nada');

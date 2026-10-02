@@ -1,13 +1,13 @@
-import { escapeMarkdown } from 'discord.js';
 import { createMutex, readJsonFile, atomicWriteJson } from './fileStore.js';
 
-// Lógica de /dm separada del comando: construir el mensaje exacto, el envío
-// secuencial y el estado persistido (cooldown + envío en curso).
+// Lógica de /dm separada del comando: el envío secuencial y el estado
+// persistido (cooldown + envío en curso).
 //
 // Los DMs masivos son el principal vector de spam en Discord: un par de
 // reportes pueden desactivar la aplicación ENTERA. Todo lo de aquí (pausa
-// entre envíos, cabecera de atribución no editable, cooldown, sin
-// reanudación) existe para no parecerse a ese patrón.
+// entre envíos, cooldown, sin reanudación) existe para no parecerse a ese
+// patrón. El mensaje llega tal cual se escribe, sin cabecera: quién lo mandó
+// queda en el canal de logs.
 
 export const DM_MAX_RECIPIENTS = 200;
 export const DM_BODY_MAX_LENGTH = 1900;
@@ -15,7 +15,6 @@ export const DM_COOLDOWN_MS = 10 * 60_000;
 export const DM_SEND_DELAY_MS = 1000;
 export const DM_PROGRESS_EVERY = 25;
 
-const DISCORD_MESSAGE_MAX_LENGTH = 2000;
 const DM_CLOSED_ERROR_CODE = 50007; // "Cannot send messages to this user"
 
 /**
@@ -32,40 +31,6 @@ export function getDmOwnerId() {
 export function getDmOptOutRoleId() {
   const roleId = (process.env.DM_OPTOUT_ROLE_ID ?? '').trim();
   return roleId.length > 0 ? roleId : null;
-}
-
-function buildHeader(senderName, guildName) {
-  return `📨 ${escapeMarkdown(senderName)} te envía este mensaje desde **${escapeMarkdown(guildName)}**:`;
-}
-
-function shorten(text, length) {
-  return text.length <= length ? text : `${text.slice(0, Math.max(0, length - 1))}…`;
-}
-
-/**
- * El mensaje EXACTO que recibe cada destinatario: la cabecera de atribución
- * (que el remitente no controla: sale de su nombre en el servidor y del
- * nombre del servidor) + una línea en blanco + el cuerpo tal cual.
- *
- * Nunca pasa de 2000 caracteres: con un cuerpo de 1900 y un nombre de
- * servidor largo (hasta 100) la cabecera completa no cabe, así que se
- * recortan los NOMBRES (primero el del servidor, luego el del remitente),
- * nunca el cuerpo ni la cabecera en sí.
- * @param {{ senderName: string, guildName: string, body: string }} params
- * @returns {string}
- */
-export function buildDmContent({ senderName, guildName, body }) {
-  let sender = String(senderName);
-  let guild = String(guildName);
-  const compose = () => `${buildHeader(sender, guild)}\n\n${body}`;
-
-  while (compose().length > DISCORD_MESSAGE_MAX_LENGTH && guild.length > 1) {
-    guild = shorten(guild, guild.length - 1);
-  }
-  while (compose().length > DISCORD_MESSAGE_MAX_LENGTH && sender.length > 1) {
-    sender = shorten(sender, sender.length - 1);
-  }
-  return compose();
 }
 
 /**

@@ -167,7 +167,7 @@ export async function notifyDmUnauthorized(client, { actorTag, actorId }) {
 /**
  * Rastro de cada /dm, ANTES de empezar a enviar (para que quede aunque el
  * bot se caiga a mitad): quién, a cuántos, el texto completo tal y como lo
- * reciben (cabecera incluida) y la hora (el timestamp del embed).
+ * reciben y la hora (el timestamp del embed).
  * @param {import('discord.js').Client} client
  * @param {{ actorTag: string, actorId: string, total: number, content: string }} params
  */

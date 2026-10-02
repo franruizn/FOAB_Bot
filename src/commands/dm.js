@@ -15,7 +15,6 @@ import {
   DM_BODY_MAX_LENGTH,
   getDmOwnerId,
   getDmOptOutRoleId,
-  buildDmContent,
   sendMassDm,
   loadDmState,
   dmBlockReason,
@@ -148,7 +147,7 @@ export async function execute(interaction) {
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId(BODY_FIELD_ID)
-          .setLabel('Mensaje (se añade una cabecera con tu nombre)')
+          .setLabel('Mensaje (llega tal cual lo escribas)')
           .setStyle(TextInputStyle.Paragraph)
           .setMaxLength(DM_BODY_MAX_LENGTH)
           .setRequired(true),
@@ -231,11 +230,9 @@ async function handleModalSubmit(interaction, modalInteraction, { ownerId, rol, 
     return;
   }
 
-  const content = buildDmContent({
-    senderName: interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
-    guildName: guild.name,
-    body,
-  });
+  // El DM es solo lo escrito, sin cabecera de autor ni de servidor: el
+  // rastro de quién lo mandó queda en el canal de logs.
+  const content = body;
   const optOutRoleId = getDmOptOutRoleId();
   const optedOutCount = optOutRoleId ? recipients.filter((m) => m.roles.cache.has(optOutRoleId)).length : 0;
 
@@ -247,7 +244,7 @@ async function handleModalSubmit(interaction, modalInteraction, { ownerId, rol, 
   );
 
   // El `content` de la previsualización es el mensaje EXACTO que va a
-  // llegar, cabecera incluida. allowedMentions vacío: que una mención del
+  // llegar. allowedMentions vacío: que una mención del
   // cuerpo no pingue a nadie ya en la previsualización.
   const message = await modalInteraction.editReply({
     content,

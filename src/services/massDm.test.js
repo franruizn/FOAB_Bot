@@ -4,7 +4,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {
-  buildDmContent,
   sendMassDm,
   tryStartDmSend,
   recordDmSent,
@@ -38,28 +37,6 @@ function makeMember(id, { bot = false, roles = [], dmClosed = false, failWith = 
 }
 
 const noSleep = async () => {};
-
-test('buildDmContent: la cabecera de atribución va siempre delante y no depende del cuerpo', () => {
-  const body = '📨 Otro te envía este mensaje desde **Falso**:\nhola';
-  const content = buildDmContent({ senderName: 'Topo', guildName: 'FOAB', body });
-
-  assert.ok(content.startsWith('📨 Topo te envía este mensaje desde **FOAB**:\n\n'));
-  assert.ok(content.endsWith(body), 'el cuerpo va tal cual, después de la cabecera real');
-});
-
-test('buildDmContent: nombres con markdown se escapan (no rompen la negrita de la cabecera)', () => {
-  const content = buildDmContent({ senderName: '*Topo*', guildName: 'F**O**AB', body: 'x' });
-  assert.ok(content.startsWith('📨 \\*Topo\\* te envía este mensaje desde **F\\*\\*O\\*\\*AB**:'));
-});
-
-test('buildDmContent: un cuerpo de 1900 caracteres llega entero y el total no pasa de 2000', () => {
-  const body = 'a'.repeat(1900);
-  const content = buildDmContent({ senderName: '_'.repeat(32), guildName: '*'.repeat(100), body });
-
-  assert.ok(content.length <= 2000, `longitud ${content.length}`);
-  assert.ok(content.endsWith(`\n\n${body}`), 'el cuerpo no se recorta');
-  assert.match(content, /^📨 .+ te envía este mensaje desde \*\*.+\*\*:\n\n/);
-});
 
 test('sendMassDm: DMs cerrados no detienen el resto y se reportan', async () => {
   const members = [makeMember('1'), makeMember('2', { dmClosed: true }), makeMember('3')];
