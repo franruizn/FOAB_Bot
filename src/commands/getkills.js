@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { parseAlbionbbUrl } from '../services/albionbb.js';
-import { getBattleEvents } from '../services/albionApi.js';
+import { getBattle, getBattleEvents } from '../services/albionApi.js';
 import { loadConfig } from '../services/config.js';
 import { aggregateBattle } from '../services/aggregate.js';
 import { buildKillsEmbed } from '../ui/killsEmbed.js';
@@ -43,11 +43,20 @@ export async function execute(interaction) {
   const config = await loadConfig(SQUADS_CONFIG_PATH);
 
   const events = [];
+  const battles = [];
   let processed = 0;
 
   for (const battleId of battleIds) {
     try {
-      const battleEvents = await getBattleEvents(server, battleId);
+      // El resumen da la presencia (incluye a quien no mató ni murió) y los
+      // eventos dan las kills/deaths. Si falla cualquiera de los dos la
+      // batalla entera cuenta como no procesada: con solo eventos la presencia
+      // quedaría infracontada sin avisar.
+      const [battle, battleEvents] = await Promise.all([
+        getBattle(server, battleId),
+        getBattleEvents(server, battleId),
+      ]);
+      battles.push(battle);
       events.push(...battleEvents);
       processed += 1;
     } catch (error) {
@@ -61,7 +70,7 @@ export async function execute(interaction) {
     throw new Error(`No se pudo obtener información de ninguna de las ${battleIds.length} batalla(s) solicitada(s).`);
   }
 
-  const result = aggregateBattle({ events, config });
+  const result = aggregateBattle({ events, battles, config });
   const guildsDisplay = [...config.guilds].join(' / ');
 
   const embeds = buildKillsEmbed({

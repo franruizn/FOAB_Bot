@@ -12,7 +12,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { getBattleEvents, SERVER_HOSTS } from '../src/services/albionApi.js';
+import { getBattle, getBattleEvents, SERVER_HOSTS } from '../src/services/albionApi.js';
 import { loadConfig, invalidateConfigCache } from '../src/services/config.js';
 import { aggregateBattle } from '../src/services/aggregate.js';
 
@@ -74,7 +74,36 @@ async function checkRealBattle() {
   check('la batalla tiene eventos', events.length > 0, `0 eventos para ${battleId}`);
   if (events.length === 0) return;
 
-  const result = aggregateBattle({ events, config });
+  const battle = await getBattle(server, battleId);
+  const isTracked = (guildName) => Boolean(guildName) && config.guilds.has(guildName.toLowerCase());
+  const presentNames = new Set(
+    Object.values(battle.players ?? {})
+      .filter((p) => isTracked(p.guildName))
+      .map((p) => p.name.toLowerCase()),
+  );
+  check('el resumen lista participantes del gremio', presentNames.size > 0, `0 jugadores de "${firstGuildName}" en /battles/${battleId}`);
+
+  const eventsOnly = aggregateBattle({ events, config });
+  const result = aggregateBattle({ events, battles: [battle], config });
+  const bucketNames = result.buckets.flatMap((b) => b.players.map((p) => p.name.toLowerCase()));
+
+  check(
+    'todo jugador del gremio que figura en el resumen está en algún bucket',
+    [...presentNames].every((name) => bucketNames.includes(name)),
+    `faltan: ${[...presentNames].filter((name) => !bucketNames.includes(name)).join(', ')}`,
+  );
+  check(
+    'uniquePlayers == jugadores en buckets, sin duplicados',
+    result.totals.uniquePlayers === bucketNames.length && new Set(bucketNames).size === bucketNames.length,
+    `uniquePlayers=${result.totals.uniquePlayers}, en buckets=${bucketNames.length}`,
+  );
+  check(
+    'la presencia no cambia las kills/deaths totales',
+    result.totals.kills === eventsOnly.totals.kills && result.totals.deaths === eventsOnly.totals.deaths,
+    `${result.totals.kills}-${result.totals.deaths} != ${eventsOnly.totals.kills}-${eventsOnly.totals.deaths}`,
+  );
+  console.log(`  (presentes: ${result.totals.uniquePlayers}; solo con eventos: ${eventsOnly.totals.uniquePlayers})`);
+
   const sumKills = result.buckets.reduce((acc, b) => acc + b.kills, 0);
   const sumDeaths = result.buckets.reduce((acc, b) => acc + b.deaths, 0);
 

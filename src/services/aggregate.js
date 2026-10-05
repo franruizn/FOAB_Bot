@@ -2,8 +2,15 @@
  * Agrega los eventos de una batalla en buckets (MAIN ZERG + squads), detecta
  * la alianza amiga y cuenta enemigos únicos.
  *
+ * Dos fuentes con papeles distintos: los resúmenes (`battles`) dicen QUIÉN
+ * estuvo presente; los eventos (`events`) dicen cuántas kills/deaths tiene
+ * cada uno. Un healer con 0 kills y 0 deaths no sale en ningún evento, pero sí
+ * en el resumen.
+ *
  * @param {object} params
  * @param {object[]} params.events - eventos de kill devueltos por albionApi.getBattleEvents
+ * @param {object[]} [params.battles=[]] - resúmenes devueltos por albionApi.getBattle,
+ *   uno por batalla. Un jugador presente en varias cuenta una sola vez.
  * @param {import('./config.js').ConfigData} params.config - config cargada por config.loadConfig
  * @param {boolean} [params.countAssists=false] - ver nota junto al bucle principal
  * @returns {{
@@ -13,13 +20,13 @@
  *   warnings: string[],
  * }}
  */
-export function aggregateBattle({ events, config, countAssists = false }) {
+export function aggregateBattle({ events, battles = [], config, countAssists = false }) {
   const { guilds, squadOrder, squads, playerToSquad, warnings = [] } = config;
 
   const isTrackedGuild = (guildName) => Boolean(guildName) && guilds.has(guildName.toLowerCase());
 
-  // Registro de todo jugador visto en la batalla (Killer + Victim + Participants
-  // de cada evento), usado para detectar la alianza amiga y contar enemigos
+  // Registro de todo jugador visto en la batalla (participantes del resumen +
+  // Killer + Victim + Participants de cada evento), usado para detectar la alianza amiga y contar enemigos
   // únicos. GroupMembers queda fuera a propósito: son compañeros de party que
   // pueden no haber participado realmente en ningún combate de esta batalla.
   const allPlayers = new Map(); // nameLower -> { name, guildName, allianceName }
@@ -36,9 +43,9 @@ export function aggregateBattle({ events, config, countAssists = false }) {
     }
   };
 
-  // Jugadores de nuestro gremio con kills/deaths acreditados. Solo estos
-  // entran en los buckets: un jugador que solo aparece como Participant sin
-  // recibir nunca un kill/death no aporta nada a un reporte de kills/deaths.
+  // Jugadores de nuestro gremio presentes en la batalla: los que figuran en
+  // el resumen (aunque tengan 0 kills y 0 deaths) más los que tienen un
+  // kill/death acreditado en los eventos. Todos entran en los buckets.
   const playerRecords = new Map(); // nameLower -> { name, kills, deaths, squadKey }
 
   const getOrCreateRecord = (player) => {
@@ -58,6 +65,24 @@ export function aggregateBattle({ events, config, countAssists = false }) {
     }
     return record;
   };
+
+  // Presencia: el resumen lista a todos los participantes. Solo crea el
+  // record (en 0/0); las kills/deaths del resumen se ignoran a propósito para
+  // que las cifras sigan saliendo de una única fuente, los eventos.
+  for (const battle of battles) {
+    for (const participant of Object.values(battle?.players ?? {})) {
+      if (!participant?.name) continue;
+      // Todos, amigos y enemigos, cuentan como vistos: un enemigo con 0 kills
+      // y 0 deaths también es un enemigo único.
+      registerPlayer({
+        Name: participant.name,
+        GuildName: participant.guildName,
+        AllianceName: participant.allianceName,
+      });
+      if (!isTrackedGuild(participant.guildName)) continue;
+      getOrCreateRecord({ Name: participant.name });
+    }
+  }
 
   for (const event of events) {
     const killer = event.Killer;
@@ -131,7 +156,7 @@ export function aggregateBattle({ events, config, countAssists = false }) {
 
   // Buckets: MAIN ZERG primero, luego cada squad en el orden del fichero.
   // Se incluyen TODOS los squads de squadOrder aunque no tengan jugadores
-  // acreditados en esta batalla (kills/deaths en 0, players vacío).
+  // presentes en esta batalla (kills/deaths en 0, players vacío).
   const bucketMap = new Map();
   bucketMap.set('main', { key: 'main', display: 'MAIN ZERG', kills: 0, deaths: 0, players: [] });
   for (const squadKey of squadOrder) {

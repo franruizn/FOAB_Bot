@@ -13,13 +13,23 @@ function makeConfig(warnings = []) {
       ['raf', { display: 'RAF', members: new Set(['sziahogyvagy']) }],
       ['empty', { display: 'EMPTY', members: new Set(['nadie']) }],
     ]),
-    playerToSquad: new Map([['sziahogyvagy', 'raf']]),
+    playerToSquad: new Map([['sziahogyvagy', 'raf'], ['nadie', 'empty']]),
     warnings,
   };
 }
 
 function player(name, guildName, allianceName) {
   return { Name: name, GuildName: guildName, AllianceName: allianceName };
+}
+
+// Resumen de batalla con la forma de albionApi.getBattle: players es un objeto
+// indexado por id de jugador, no un array.
+function summaryPlayer(name, guildName, allianceName, kills = 0, deaths = 0) {
+  return { name, guildName, allianceName, kills, deaths };
+}
+
+function battle(players) {
+  return { players: Object.fromEntries(players.map((p, index) => [`id-${index}`, p])) };
 }
 
 // 6 eventos: (1) kill de gremio + jugador de squad, (2) muerte de gremio +
@@ -119,9 +129,101 @@ test('uniqueEnemies cuenta por alianza, no por gremio', () => {
   assert.equal(result.totals.uniqueEnemies, 8);
 });
 
-test('uniquePlayers cuenta solo jugadores de gremio con kill o death acreditado', () => {
-  const result = aggregateBattle({ events, config: makeConfig() });
-  assert.equal(result.totals.uniquePlayers, 4); // SziahogyVagy, MainPlayer, "123", "1114"
+test('uniquePlayers cuenta a todos los jugadores de gremio presentes, también sin kill ni death', () => {
+  const battles = [
+    battle([
+      summaryPlayer('SziahogyVagy', 'FOAB', 'FRIEND', 1, 0),
+      summaryPlayer('MainPlayer', 'FOAB', 'FRIEND', 1, 1),
+      summaryPlayer('123', 'FOAB', 'FRIEND', 1, 0),
+      summaryPlayer('1114', 'FOAB', 'SOLO', 0, 1),
+      summaryPlayer('HealerMain', 'FOAB', 'FRIEND'), // presente, sin ningún evento
+    ]),
+  ];
+  const result = aggregateBattle({ events, battles, config: makeConfig() });
+  // Los 4 con eventos + HealerMain, que no tiene ni kill ni death.
+  assert.equal(result.totals.uniquePlayers, 5);
+});
+
+test('un jugador de squad presente con 0 kills y 0 deaths cuenta en su squad', () => {
+  const battles = [battle([summaryPlayer('Nadie', 'FOAB', 'FRIEND')])];
+  const result = aggregateBattle({ events, battles, config: makeConfig() });
+  const byKey = Object.fromEntries(result.buckets.map((bucket) => [bucket.key, bucket]));
+
+  assert.deepEqual(byKey.empty.players, [{ name: 'Nadie', kills: 0, deaths: 0 }]);
+  assert.equal(byKey.empty.kills, 0);
+  assert.equal(byKey.empty.deaths, 0);
+  assert.equal(result.totals.uniquePlayers, 5);
+});
+
+test('un jugador presente en dos batallas de la misma URL cuenta una sola vez', () => {
+  const battles = [
+    battle([summaryPlayer('Nadie', 'FOAB', 'FRIEND'), summaryPlayer('SziahogyVagy', 'FOAB', 'FRIEND', 1, 0)]),
+    // Casing distinto en la segunda batalla: sigue siendo el mismo jugador.
+    battle([summaryPlayer('NADIE', 'FOAB', 'FRIEND'), summaryPlayer('SziahogyVagy', 'FOAB', 'FRIEND')]),
+  ];
+  const result = aggregateBattle({ events, battles, config: makeConfig() });
+  const byKey = Object.fromEntries(result.buckets.map((bucket) => [bucket.key, bucket]));
+
+  assert.equal(byKey.empty.players.length, 1);
+  assert.equal(byKey.raf.players.length, 1);
+  assert.equal(result.totals.uniquePlayers, 5); // los 4 con eventos + Nadie
+});
+
+test('alguien de otro gremio presente con 0 kills no cuenta', () => {
+  const battles = [
+    battle([
+      summaryPlayer('AliadoHealer', 'Otro Gremio', 'FRIEND'), // misma alianza, otro gremio
+      summaryPlayer('EnemyHealer', 'Rival Guild', 'FOE'),
+      summaryPlayer('SinGremio', '', ''),
+    ]),
+  ];
+  const result = aggregateBattle({ events, battles, config: makeConfig() });
+  const names = result.buckets.flatMap((bucket) => bucket.players.map((p) => p.name));
+
+  assert.equal(result.totals.uniquePlayers, 4);
+  assert.ok(!names.includes('AliadoHealer'));
+  assert.ok(!names.includes('EnemyHealer'));
+  assert.ok(!names.includes('SinGremio'));
+});
+
+test('uniqueEnemies cuenta también a los enemigos presentes con 0 kills y 0 deaths', () => {
+  const battles = [
+    battle([
+      summaryPlayer('EnemyHealer', 'Rival Guild', 'FOE'), // enemigo sin ningún evento
+      summaryPlayer('EnemyOne', 'Rival Guild', 'FOE', 0, 1), // ya visto en eventos: no duplica
+      summaryPlayer('AliadoHealer', 'Otro Gremio', 'FRIEND'), // alianza amiga: no es enemigo
+      summaryPlayer('HealerMain', 'FOAB', 'FRIEND'),
+    ]),
+    battle([summaryPlayer('ENEMYHEALER', 'Rival Guild', 'FOE')]), // segunda batalla: una sola vez
+  ];
+  const result = aggregateBattle({ events, battles, config: makeConfig() });
+  // Los 8 que ya salían por eventos + EnemyHealer.
+  assert.equal(result.totals.uniqueEnemies, 9);
+  assert.equal(result.alliance, 'FRIEND');
+});
+
+test('la presencia no altera las kills/deaths: el invariante sigue cuadrando', () => {
+  const sinPresencia = aggregateBattle({ events, config: makeConfig() });
+  // Las cifras del resumen son deliberadamente absurdas: no deben usarse.
+  const battles = [
+    battle([
+      summaryPlayer('Nadie', 'FOAB', 'FRIEND', 99, 99),
+      summaryPlayer('HealerMain', 'FOAB', 'FRIEND', 50, 50),
+      summaryPlayer('MainPlayer', 'FOAB', 'FRIEND', 7, 7),
+    ]),
+  ];
+  const result = aggregateBattle({ events, battles, config: makeConfig() });
+
+  const sumBucketKills = result.buckets.reduce((acc, b) => acc + b.kills, 0);
+  const sumBucketDeaths = result.buckets.reduce((acc, b) => acc + b.deaths, 0);
+  assert.equal(sumBucketKills, result.totals.kills);
+  assert.equal(sumBucketDeaths, result.totals.deaths);
+  assert.equal(result.totals.kills, sinPresencia.totals.kills);
+  assert.equal(result.totals.deaths, sinPresencia.totals.deaths);
+  assert.deepEqual(
+    result.buckets.map((b) => [b.key, b.kills, b.deaths]),
+    sinPresencia.buckets.map((b) => [b.key, b.kills, b.deaths]),
+  );
 });
 
 test('propaga los warnings de config (jugador en varios squads)', () => {

@@ -20,8 +20,9 @@ function formatPlayerLine(name, kills) {
 
 /**
  * Construye el value de un field de bucket: "**kills** (pct%)\nK-D: ...\n\n__Título__\n<roster>".
- * MAIN ZERG: top 5 killers. Squads: todos los jugadores del bucket (incluidos
- * los de 0 kills), ordenados por kills desc y luego alfabéticamente.
+ * MAIN ZERG: top 5 killers. Squads: todos los jugadores presentes del bucket
+ * (incluidos los de 0 kills, que quedan al final), ordenados por kills desc y
+ * luego alfabéticamente.
  */
 function buildBucketValue(bucket, totalKills) {
   if (bucket.players.length === 0) return EMPTY_FIELD_VALUE;
