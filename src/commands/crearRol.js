@@ -3,7 +3,7 @@ import { isOfficer } from '../permissions.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
 import { buildCrearRolPreviewEmbed, buildCrearRolResultEmbed } from '../ui/crearRolEmbed.js';
 import { resolveMentionList } from '../services/mentionList.js';
-import { verificarPrerequisitosDeRol, CtaRoleError } from '../services/ctaRole.js';
+import { verificarPrerequisitosDeRol, RolePrerequisiteError } from '../services/rolePrerequisites.js';
 import { notifyRoleCreation } from '../logChannel.js';
 
 const CONFIRM_TIMEOUT_MS = 60_000;
@@ -55,8 +55,7 @@ export async function execute(interaction) {
     return;
   }
 
-  // Recorte silencioso: es el mismo límite que aplica generarNombreDeRolUnico
-  // para los roles de CTA, aquí sin sufijo que preservar.
+  // Recorte silencioso al límite de Discord para nombres de rol.
   const rolName = nombreInput.slice(0, ROLE_NAME_MAX_LENGTH);
 
   // Dos roles con el mismo nombre son indistinguibles al asignar a mano:
@@ -122,13 +121,13 @@ export async function execute(interaction) {
   // antes de empezar para no chocar con la ventana de 3s de la interacción.
   await buttonInteraction.deferUpdate();
 
-  // Mismas comprobaciones que /cta (permiso "Gestionar roles", jerarquía por
-  // encima de la posición 1, tope de 250 roles), reutilizadas tal cual: si
-  // fallan aquí, terminan ANTES de tocar guild.roles.create().
+  // Permiso "Gestionar roles", jerarquía por encima de la posición 1 y tope
+  // de 250 roles (services/rolePrerequisites.js): si fallan aquí, terminan
+  // ANTES de tocar guild.roles.create().
   try {
     verificarPrerequisitosDeRol(interaction.guild);
   } catch (error) {
-    if (error instanceof CtaRoleError) {
+    if (error instanceof RolePrerequisiteError) {
       await buttonInteraction.editReply({
         content: null,
         embeds: [errorEmbed('No se pudo crear el rol', error.message)],

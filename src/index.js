@@ -3,9 +3,6 @@ import { Client, Collection, Events, GatewayIntentBits, Partials } from 'discord
 import * as getkills from './commands/getkills.js';
 import * as squads from './commands/squads.js';
 import * as attendance from './commands/attendance.js';
-import * as comp from './commands/comp.js';
-import * as cta from './commands/cta.js';
-import * as maestria from './commands/maestria.js';
 import * as health from './commands/health.js';
 import * as sorteo from './commands/sorteo.js';
 import * as crearRol from './commands/crearRol.js';
@@ -14,12 +11,8 @@ import { handleInteractionError } from './interactionErrorHandler.js';
 import { ensureSquadsConfig } from './dataPaths.js';
 import { waitForPendingWrites } from './services/squadsStore.js';
 import { waitForPendingRaffleWrites } from './services/rafflesStore.js';
-import { waitForPendingCtaWrites } from './services/ctaStore.js';
 import { notifyUncontrolledError, notifyDmInterrupted } from './logChannel.js';
 import { initializeRaffles, handleRaffleReactionAdd } from './raffleScheduler.js';
-import { initializeCtaTimers } from './ctaScheduler.js';
-import { flushPendingEmbedRefreshes } from './ctaEmbedSync.js';
-import { validarCredenciales } from './services/sheets.js';
 import { takeInterruptedDmSend, waitForPendingDmWrites } from './services/massDm.js';
 import { DM_STATE_PATH } from './dataPaths.js';
 
@@ -47,27 +40,22 @@ process.on('uncaughtException', (error) => {
 // reinicio el mensaje del sorteo no está en caché, y sin Partials.Message /
 // Partials.Reaction las reacciones de un mensaje no cacheado llegan
 // incompletas.
-// GuildVoiceStates NO es un intent privilegiado (no hace falta activarlo en
-// el Developer Portal). Lo necesita /cta voz para ver quién está en el
-// canal de voz del oficial que lo ejecuta.
 //
 // GuildMembers SÍ es un intent PRIVILEGIADO: hay que activar "Server
 // Members Intent" en el Developer Portal del bot (pestaña Bot), si no
-// `guild.members.fetch()` falla en producción. Lo necesita /cta sync para
-// reconciliar el rol de una CTA abierta (services/ctaRole.js,
-// reconciliarRolDeCta) contra quién está inscrito de verdad ahora mismo.
+// `guild.members.fetch()` falla en producción. Lo necesitan /crear-rol y
+// /dm para resolver a los miembros del servidor.
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers,
   ],
   partials: [Partials.Message, Partials.Reaction, Partials.Channel],
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, comp, cta, maestria, health, sorteo, crearRol, dm]) {
+for (const command of [getkills, squads, attendance, health, sorteo, crearRol, dm]) {
   client.commands.set(command.data.name, command);
 }
 
@@ -79,11 +67,6 @@ client.once(Events.ClientReady, async (readyClient) => {
     console.error('[raffle] Error inicializando sorteos pendientes:', error?.stack ?? error);
   }
   try {
-    await initializeCtaTimers(readyClient);
-  } catch (error) {
-    console.error('[cta] Error inicializando las CTAs activas:', error?.stack ?? error);
-  }
-  try {
     // Un /dm cortado por el reinicio NO se reanuda (reenviar a quien ya lo
     // recibió es peor que no enviar): solo se avisa de cuántos salieron.
     const interrumpido = await takeInterruptedDmSend(DM_STATE_PATH);
@@ -93,17 +76,6 @@ client.once(Events.ClientReady, async (readyClient) => {
     }
   } catch (error) {
     console.error('[dm] Error comprobando envíos interrumpidos:', error?.stack ?? error);
-  }
-  try {
-    // validarCredenciales() nunca lanza (su resultado ES la respuesta): esto
-    // solo salta si algo revienta antes de eso. Se comprueba una vez al
-    // arrancar para que un login/credenciales rotas se note en el log desde
-    // el minuto uno, en vez de esperar a que falle en caliente al cerrar la
-    // primera CTA del día.
-    const resultado = await validarCredenciales();
-    console.log(JSON.stringify({ timestamp: isoLocal(), type: 'startup', component: 'sheets', ...resultado }));
-  } catch (error) {
-    console.error('[sheets] Error inesperado validando las credenciales de Google Sheets:', error?.stack ?? error);
   }
 });
 
@@ -159,22 +131,6 @@ function logCommand({ interaction, durationMs, result, error }) {
   console.log(JSON.stringify(entry));
 }
 
-function logComponentInteraction({ interaction, kind, durationMs, result, error }) {
-  const entry = {
-    timestamp: isoLocal(),
-    type: 'component',
-    kind,
-    customId: interaction.customId,
-    user: interaction.user?.tag ?? 'unknown',
-    userId: interaction.user?.id ?? null,
-    guildId: interaction.guildId ?? null,
-    durationMs,
-    result,
-  };
-  if (error) entry.error = error instanceof Error ? error.message : String(error);
-  console.log(JSON.stringify(entry));
-}
-
 client.on(Events.MessageReactionAdd, (reaction, user) => {
   handleRaffleReactionAdd(reaction, user).catch((error) => {
     console.error('[raffle] Error procesando messageReactionAdd:', error?.stack ?? error);
@@ -185,34 +141,6 @@ let isShuttingDown = false;
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (isShuttingDown) return; // no aceptar trabajo nuevo mientras cerramos
-
-  // Botones y selects de una CTA (Apuntarse/Tentativo/Salir/Panel del
-  // caller, y el panel de inscripción) son componentes PERSISTENTES: siguen
-  // vivos horas y sobreviven a un reinicio del bot, así que se enrutan por
-  // customId aquí (el dispatcher global) en vez de con un collector local
-  // como hace /squads con su confirmación de borrado (que solo vive 30s).
-  // Solo se intercepta lo que parsea como customId de CTA: todo lo demás
-  // (confirmaciones de /squads, /comp) sigue yendo a sus propios
-  // awaitMessageComponent() sin que este bloque los toque.
-  if ((interaction.isButton() || interaction.isStringSelectMenu()) && cta.isCtaComponent(interaction.customId)) {
-    const startedAt = Date.now();
-    const kind = interaction.isButton() ? 'button' : 'select';
-    try {
-      if (interaction.isButton()) {
-        await cta.handleButton(interaction);
-      } else {
-        await cta.handleSelectMenu(interaction);
-      }
-      logComponentInteraction({ interaction, kind, durationMs: Date.now() - startedAt, result: 'ok' });
-    } catch (error) {
-      logComponentInteraction({ interaction, kind, durationMs: Date.now() - startedAt, result: 'error', error });
-      const { known } = await handleInteractionError(interaction, error);
-      if (!known) {
-        await notifyUncontrolledError(client, { commandName: `cta (${kind})`, actorTag: interaction.user.tag, error });
-      }
-    }
-    return;
-  }
 
   if (interaction.isAutocomplete()) {
     const command = client.commands.get(interaction.commandName);
@@ -262,13 +190,9 @@ async function shutdown(signal) {
   console.log(JSON.stringify({ timestamp: isoLocal(), type: 'shutdown', msg: `Señal ${signal} recibida, cerrando...` }));
 
   try {
-    // Fuerza cualquier reedición de embed de CTA agrupada (2s) pendiente
-    // ANTES de esperar las escrituras: una reedición puede depender del
-    // estado que la última escritura acaba de dejar.
-    await flushPendingEmbedRefreshes();
-    // Espera cualquier escritura de squads.json, raffles.json o cta.json ya
+    // Espera cualquier escritura de squads.json, raffles.json o dm.json ya
     // en curso (tmp + rename) antes de desconectar, para no cortarla a mitad.
-    await Promise.all([waitForPendingWrites(), waitForPendingRaffleWrites(), waitForPendingCtaWrites(), waitForPendingDmWrites()]);
+    await Promise.all([waitForPendingWrites(), waitForPendingRaffleWrites(), waitForPendingDmWrites()]);
   } catch (error) {
     console.error('[shutdown] Error esperando escrituras pendientes:', error?.stack ?? error);
   }

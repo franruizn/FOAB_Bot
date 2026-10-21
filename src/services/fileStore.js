@@ -3,7 +3,7 @@ import path from 'node:path';
 
 // Piezas compartidas por los stores JSON con mutex + escritura atómica +
 // backups (squadsStore.js fue el primero en implementar este patrón; este
-// módulo evita que ctaComp.js y ctaStore.js lo dupliquen byte a byte).
+// módulo evita que el resto de stores, como massDm.js, lo dupliquen byte a byte).
 //
 // Cada módulo que use esto sigue teniendo SU PROPIO mutex (createMutex() no
 // es un singleton): un fichero JSON = un candado, igual que
