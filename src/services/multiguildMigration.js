@@ -175,8 +175,8 @@ export async function migrarAMultiguild({ dataDir = DATA_DIR, env = process.env,
   if (guildNames.length > 1) {
     logger.warn(
       `${LOG_PREFIX} squads.json tenía ${guildNames.length} gremios (${guildNames.join(', ')}). ` +
-        `albionGuild = "${albionGuild}" (el primero). El resto (${guildNames.slice(1).join(', ')}) hay que ` +
-        'añadirlos como squads de tipo gremio; de momento siguen en la lista "guilds" de squads.json.',
+        `albionGuild = "${albionGuild}" (el primero). El resto (${guildNames.slice(1).join(', ')}) pasan a ser ` +
+        'squads de tipo gremio automáticamente la primera vez que se cargue squads.json (ver services/config.js).',
     );
   }
 

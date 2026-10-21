@@ -20,6 +20,9 @@ import { aggregateBattle } from '../src/services/aggregate.js';
 // pruebas/CI), no contra DATA_DIR: no simula un bot desplegado, valida el
 // pipeline de agregación en sí.
 const SQUADS_CONFIG_PATH = fileURLToPath(new URL('../src/config/squads.seed.json', import.meta.url));
+// Gremio principal del fichero semilla (en el bot sale de albionGuild en el
+// config.json del servidor).
+const SEED_MAIN_GUILD = 'vips';
 
 let failures = 0;
 
@@ -55,7 +58,7 @@ async function checkRealBattle() {
 
   const config = await loadConfigFromFile(SQUADS_CONFIG_PATH);
   const server = process.env.ALBION_SERVER || 'europe';
-  const [firstGuildName] = [...config.guilds];
+  const firstGuildName = SEED_MAIN_GUILD;
 
   const guildId = await resolveGuildId(server, firstGuildName);
   if (!guildId) {
@@ -75,7 +78,7 @@ async function checkRealBattle() {
   if (events.length === 0) return;
 
   const battle = await getBattle(server, battleId);
-  const isTracked = (guildName) => Boolean(guildName) && config.guilds.has(guildName.toLowerCase());
+  const isTracked = (guildName) => Boolean(guildName) && guildName.toLowerCase() === SEED_MAIN_GUILD;
   const presentNames = new Set(
     Object.values(battle.players ?? {})
       .filter((p) => isTracked(p.guildName))
@@ -83,8 +86,8 @@ async function checkRealBattle() {
   );
   check('el resumen lista participantes del gremio', presentNames.size > 0, `0 jugadores de "${firstGuildName}" en /battles/${battleId}`);
 
-  const eventsOnly = aggregateBattle({ events, config });
-  const result = aggregateBattle({ events, battles: [battle], config });
+  const eventsOnly = aggregateBattle({ events, config, mainGuild: SEED_MAIN_GUILD });
+  const result = aggregateBattle({ events, battles: [battle], config, mainGuild: SEED_MAIN_GUILD });
   const bucketNames = result.buckets.flatMap((b) => b.players.map((p) => p.name.toLowerCase()));
 
   check(
@@ -111,6 +114,12 @@ async function checkRealBattle() {
     'kills(MAIN ZERG) + suma(squads) == kills totales',
     sumKills === result.totals.kills,
     `${sumKills} != ${result.totals.kills}`,
+  );
+  const guildKillsInEvents = events.filter((e) => isTracked(e.Killer?.GuildName)).length;
+  check(
+    'kills totales == kills del gremio principal según los eventos',
+    result.totals.kills === guildKillsInEvents,
+    `${result.totals.kills} != ${guildKillsInEvents}`,
   );
   check(
     'deaths(MAIN ZERG) + suma(squads) == deaths totales',
@@ -154,7 +163,7 @@ function makeKillEvent(id, killerName, killerGuild, victimName, victimGuild) {
 async function checkNumericAndPartialNames() {
   console.log('\n[3] Nombres numéricos ("123"/"1114") sin coincidencia parcial');
 
-  await withTempConfig({ guilds: ['testguild'], squads: { raf: ['123', '1114'] } }, async (file) => {
+  await withTempConfig({ squads: { raf: { isGuild: false, members: ['123', '1114'] } } }, async (file) => {
     const config = await loadConfigFromFile(file);
     const events = [
       makeKillEvent(1, '123', 'TestGuild', 'Enemy1', 'Enemy'),
@@ -167,7 +176,7 @@ async function checkNumericAndPartialNames() {
       makeKillEvent(6, '11140', 'TestGuild', 'Enemy6', 'Enemy'),
     ];
 
-    const result = aggregateBattle({ events, config });
+    const result = aggregateBattle({ events, config, mainGuild: 'testguild' });
     const byKey = Object.fromEntries(result.buckets.map((b) => [b.key, b]));
     const rafNames = byKey.raf.players.map((p) => p.name).sort();
     const mainNames = byKey.main.players.map((p) => p.name).sort();
@@ -189,11 +198,11 @@ async function checkNumericAndPartialNames() {
 async function checkCasingMismatch() {
   console.log('\n[4] Casing distinto entre squads.json y la API del juego');
 
-  await withTempConfig({ guilds: ['testguild'], squads: { raf: ['winterblatt'] } }, async (file) => {
+  await withTempConfig({ squads: { raf: { isGuild: false, members: ['winterblatt'] } } }, async (file) => {
     const config = await loadConfigFromFile(file);
     const events = [makeKillEvent(1, 'Winterblatt', 'TestGuild', 'Enemy1', 'Enemy')];
 
-    const result = aggregateBattle({ events, config });
+    const result = aggregateBattle({ events, config, mainGuild: 'testguild' });
     const rafBucket = result.buckets.find((b) => b.key === 'raf');
 
     check('cuenta el kill en "raf" pese al casing distinto', rafBucket.kills === 1, `raf.kills = ${rafBucket.kills}`);

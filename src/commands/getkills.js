@@ -1,7 +1,8 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { parseAlbionbbUrl } from '../services/albionbb.js';
 import { getBattle, getBattleEvents } from '../services/albionApi.js';
-import { loadConfig } from '../services/config.js';
+import { loadConfig, ConfigError } from '../services/config.js';
+import { getConfig, rutaDe } from '../services/guildStore.js';
 import { aggregateBattle } from '../services/aggregate.js';
 import { buildKillsEmbed } from '../ui/killsEmbed.js';
 
@@ -39,7 +40,16 @@ export async function execute(interaction) {
   // editReply porque deferReply() se llamó arriba.
   const url = interaction.options.getString('url', true);
   const { server, battleIds } = parseAlbionbbUrl(url);
+  // loadConfig primero: si squads.json venía en el formato viejo, su
+  // conversión puede fijar albionGuild.
   const config = await loadConfig(interaction.guildId);
+  const { albionGuild: mainGuild } = await getConfig(interaction.guildId);
+  if (!mainGuild) {
+    throw new ConfigError('Este servidor no tiene gremio principal (albionGuild) en su config.json.', {
+      path: rutaDe(interaction.guildId, 'config.json'),
+      reason: 'missing_main_guild',
+    });
+  }
 
   const events = [];
   const battles = [];
@@ -69,14 +79,14 @@ export async function execute(interaction) {
     throw new Error(`No se pudo obtener información de ninguna de las ${battleIds.length} batalla(s) solicitada(s).`);
   }
 
-  const result = aggregateBattle({ events, battles, config });
-  const guildsDisplay = [...config.guilds].join(' / ');
+  const result = aggregateBattle({ events, battles, config, mainGuild });
+  for (const warning of result.warnings) console.warn(`[getkills] ${warning}`);
 
   const embeds = buildKillsEmbed({
     result,
     battlesProcessed: processed,
     battlesRequested: battleIds.length,
-    guildsDisplay,
+    mainGuildDisplay: mainGuild,
     originalUrl: url,
     battleDate: resolveBattleDate(events),
   });

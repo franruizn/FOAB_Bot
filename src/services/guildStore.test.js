@@ -86,12 +86,12 @@ test('rutaDe(): un guildId que no es un snowflake o un fichero con ruta nunca ll
 
 test('escribir en el servidor A no toca los ficheros del B', async () => {
   await setConfig(GUILD_B, { officerRoleId: 'oficiales-b' });
-  await writeFile(rutaDe(GUILD_B, 'squads.json'), JSON.stringify({ guilds: ['gremio-b'], squads: { b: ['jugadorb'] } }));
+  await writeFile(rutaDe(GUILD_B, 'squads.json'), JSON.stringify({ squads: { b: { isGuild: false, members: ['jugadorb'] } } }));
   await addRaffle({ id: 'r-b', guildId: GUILD_B, channelId: 'c', messageId: 'm', endsAt: 0, creatorId: 'u' });
   const before = await snapshotDir(rutaDe(GUILD_B));
 
   await setConfig(GUILD_A, { officerRoleId: 'oficiales-a', logChannelId: 'logs-a' });
-  await writeFile(rutaDe(GUILD_A, 'squads.json'), JSON.stringify({ guilds: ['gremio-a'], squads: {} }));
+  await writeFile(rutaDe(GUILD_A, 'squads.json'), JSON.stringify({ squads: {} }));
   await createSquad(GUILD_A, 'nuevo');
   await addRaffle({ id: 'r-a', guildId: GUILD_A, channelId: 'c', messageId: 'm', endsAt: 0, creatorId: 'u' });
 
@@ -107,17 +107,17 @@ test('la caché devuelve datos distintos para guildId distintos (config y squads
   await setConfig(g1, { officerRoleId: 'rol-1' });
   await setConfig(g2, { officerRoleId: 'rol-2' });
   await mkdir(rutaDe(g1), { recursive: true });
-  await writeFile(rutaDe(g1, 'squads.json'), JSON.stringify({ guilds: ['uno'], squads: { alfa: ['jugadoruno'] } }));
-  await writeFile(rutaDe(g2, 'squads.json'), JSON.stringify({ guilds: ['dos'], squads: { beta: ['jugadordos'] } }));
+  await writeFile(rutaDe(g1, 'squads.json'), JSON.stringify({ squads: { alfa: { isGuild: false, members: ['jugadoruno'] }, Uno: { isGuild: true, members: [] } } }));
+  await writeFile(rutaDe(g2, 'squads.json'), JSON.stringify({ squads: { beta: { isGuild: false, members: ['jugadordos'] }, Dos: { isGuild: true, members: [] } } }));
 
   // Dos vueltas: la segunda sale de la caché, y aun así no se cruzan.
   for (let i = 0; i < 2; i++) {
     assert.equal((await getConfig(g1)).officerRoleId, 'rol-1');
     assert.equal((await getConfig(g2)).officerRoleId, 'rol-2');
-    assert.deepEqual([...(await loadConfig(g1)).guilds], ['uno']);
-    assert.deepEqual([...(await loadConfig(g2)).guilds], ['dos']);
-    assert.deepEqual((await loadConfig(g1)).squadOrder, ['alfa']);
-    assert.deepEqual((await loadConfig(g2)).squadOrder, ['beta']);
+    assert.deepEqual([...(await loadConfig(g1)).guildToSquad.keys()], ['uno']);
+    assert.deepEqual([...(await loadConfig(g2)).guildToSquad.keys()], ['dos']);
+    assert.deepEqual((await loadConfig(g1)).squadOrder, ['alfa', 'uno']);
+    assert.deepEqual((await loadConfig(g2)).squadOrder, ['beta', 'dos']);
   }
 });
 

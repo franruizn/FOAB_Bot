@@ -8,8 +8,7 @@ import {
   removePlayer,
   renameSquad,
   movePlayer,
-  addGuild,
-  removeGuild,
+  describeSquad,
 } from '../services/squadsStore.js';
 import { mutationEmbed, infoEmbed } from '../ui/squadsEmbed.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
@@ -25,7 +24,7 @@ const AUTOCOMPLETE_LIMIT = 25;
 // servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder()
   .setName('squads')
-  .setDescription('Administra los squads y gremios trackeados (solo oficiales)')
+  .setDescription('Administra los squads de jugadores y de gremio (solo oficiales)')
   .addSubcommand((sub) => sub.setName('list').setDescription('Lista todos los squads con su número de miembros'))
   .addSubcommand((sub) =>
     sub
@@ -36,8 +35,19 @@ export const data = new SlashCommandBuilder()
   .addSubcommand((sub) =>
     sub
       .setName('create')
-      .setDescription('Crea un squad vacío')
-      .addStringOption((o) => o.setName('squad').setDescription('Clave del nuevo squad').setRequired(true)),
+      .setDescription('Crea un squad de jugadores vacío, o uno que sigue a un gremio de Albion entero')
+      .addStringOption((o) =>
+        o
+          .setName('name')
+          .setDescription('Clave del squad; con is-guild, el nombre exacto del gremio de Albion')
+          .setRequired(true),
+      )
+      .addBooleanOption((o) =>
+        o
+          .setName('is-guild')
+          .setDescription('Sigue al gremio de Albion que se llama como el squad (por defecto: no)')
+          .setRequired(false),
+      ),
   )
   .addSubcommand((sub) =>
     sub
@@ -78,25 +88,6 @@ export const data = new SlashCommandBuilder()
       .setName('find')
       .setDescription('Dice en qué squad está un jugador')
       .addStringOption((o) => o.setName('jugador').setDescription('Jugador').setRequired(true).setAutocomplete(true)),
-  )
-  .addSubcommandGroup((group) =>
-    group
-      .setName('guild')
-      .setDescription('Gestiona las grafías de gremio trackeadas')
-      .addSubcommand((sub) =>
-        sub
-          .setName('add')
-          .setDescription('Añade una grafía de gremio')
-          .addStringOption((o) => o.setName('nombre').setDescription('Nombre del gremio').setRequired(true)),
-      )
-      .addSubcommand((sub) =>
-        sub
-          .setName('remove')
-          .setDescription('Quita una grafía de gremio')
-          .addStringOption((o) =>
-            o.setName('nombre').setDescription('Nombre del gremio').setRequired(true).setAutocomplete(true),
-          ),
-      ),
   );
 
 /**
@@ -112,17 +103,11 @@ export async function execute(interaction) {
   }
 
   const subcommand = interaction.options.getSubcommand();
-  const group = interaction.options.getSubcommandGroup(false);
   const ephemeral = !READ_ONLY_SUBCOMMANDS.has(subcommand);
 
   await interaction.deferReply({ ephemeral });
 
   try {
-    if (group === 'guild') {
-      await handleGuildSubcommand(interaction, subcommand);
-      return;
-    }
-
     switch (subcommand) {
       case 'list':
         await handleList(interaction);
@@ -171,15 +156,24 @@ export async function execute(interaction) {
   }
 }
 
+// Un squad de gremio con 40 personas y uno de jugadores con 40 nombres no son
+// lo mismo: cada tipo en su sección y con su icono.
 async function handleList(interaction) {
   const config = await loadConfig(interaction.guildId);
-  const lines = config.squadOrder.map((key) => {
-    const squad = config.squads.get(key);
-    return `**${squad.display}** — ${squad.members.size} miembro(s)`;
-  });
+  const squads = config.squadOrder.map((key) => config.squads.get(key));
+  const playerLines = squads
+    .filter((squad) => !squad.isGuild)
+    .map((squad) => `👥 **${escapeMarkdown(squad.display)}** — ${squad.members.size} jugador(es) en la lista`);
+  const guildLines = squads
+    .filter((squad) => squad.isGuild)
+    .map((squad) => `🛡️ **${escapeMarkdown(squad.display)}** — gremio de Albion (miembros automáticos)`);
+
+  const sections = [];
+  if (playerLines.length > 0) sections.push(`__Squads de jugadores__\n${playerLines.join('\n')}`);
+  if (guildLines.length > 0) sections.push(`__Gremios seguidos__\n${guildLines.join('\n')}`);
 
   await interaction.editReply({
-    embeds: [infoEmbed({ title: 'Squads', description: lines.join('\n') })],
+    embeds: [infoEmbed({ title: 'Squads', description: sections.join('\n\n') })],
   });
 }
 
@@ -189,23 +183,39 @@ async function handleShow(interaction) {
   const squad = config.squads.get(key);
   if (!squad) throw new SquadCommandError(`El squad "${key}" no existe.`);
 
-  const members = [...squad.members].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
-  const description = members.length > 0 ? members.map((name) => escapeMarkdown(name)).join('\n') : '—';
+  let description;
+  if (squad.isGuild) {
+    description =
+      `🛡️ Sigue al gremio de Albion **${escapeMarkdown(squad.guildName)}**.\n` +
+      'Sus miembros se toman del gremio en cada batalla: no hay lista de nombres.';
+  } else {
+    const members = [...squad.members].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    description = members.length > 0 ? members.map((name) => escapeMarkdown(name)).join('\n') : '—';
+  }
 
   await interaction.editReply({
     embeds: [infoEmbed({ title: `Squad ${squad.display}`, description })],
   });
 }
 
+function squadLabel(key, isGuild) {
+  return isGuild ? key : key.toUpperCase();
+}
+
 async function handleCreate(interaction) {
-  const input = interaction.options.getString('squad', true);
-  const { report } = await createSquad(interaction.guildId, input);
-  const description = 'Sin miembros todavía. Usa `/squads add` para añadir jugadores.';
+  const input = interaction.options.getString('name', true);
+  const isGuild = interaction.options.getBoolean('is-guild') ?? false;
+  const { report } = await createSquad(interaction.guildId, input, { isGuild });
+  const label = squadLabel(report.key, report.isGuild);
+  const description = report.isGuild
+    ? `Sigue al gremio de Albion **${escapeMarkdown(report.key)}**: en /getkills sus miembros salen del gremio, ` +
+      'en su propia sección. Ojo: renombrar el squad cambia a qué gremio sigue.'
+    : 'Sin miembros todavía. Usa `/squads add` para añadir jugadores.';
 
   await interaction.editReply({
     embeds: [
       mutationEmbed({
-        title: `Squad "${report.key.toUpperCase()}" creado`,
+        title: report.isGuild ? `Squad de gremio "${label}" creado` : `Squad "${label}" creado`,
         description,
         actorTag: interaction.user.tag,
       }),
@@ -216,7 +226,7 @@ async function handleCreate(interaction) {
     guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'create',
-    summary: `Squad "${report.key.toUpperCase()}" creado. ${description}`,
+    summary: `Squad${report.isGuild ? ' de gremio' : ''} "${label}" creado. ${description}`,
   });
 }
 
@@ -236,7 +246,9 @@ async function handleDelete(interaction) {
   );
 
   const message = await interaction.editReply({
-    content: `¿Seguro que quieres borrar el squad **${squad.display}** (${squad.members.size} miembro(s))? Esta acción no se puede deshacer.`,
+    content: squad.isGuild
+      ? `¿Seguro que quieres borrar el squad de gremio **${escapeMarkdown(squad.display)}**? Dejará de seguirse en /getkills.`
+      : `¿Seguro que quieres borrar el squad **${squad.display}** (${squad.members.size} miembro(s))? Esta acción no se puede deshacer.`,
     embeds: [],
     components: [row],
   });
@@ -258,12 +270,14 @@ async function handleDelete(interaction) {
   }
 
   const { report } = await deleteSquad(interaction.guildId, key);
-  const description = `Tenía ${report.removedMembers.length} miembro(s).`;
+  const description = report.isGuild
+    ? `Ya no se sigue al gremio de Albion "${escapeMarkdown(report.key)}".`
+    : `Tenía ${report.removedMembers.length} miembro(s).`;
   await buttonInteraction.update({
     content: null,
     embeds: [
       mutationEmbed({
-        title: `Squad "${report.key.toUpperCase()}" borrado`,
+        title: `Squad "${squadLabel(report.key, report.isGuild)}" borrado`,
         description,
         actorTag: interaction.user.tag,
       }),
@@ -275,7 +289,7 @@ async function handleDelete(interaction) {
     guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'delete',
-    summary: `Squad "${report.key.toUpperCase()}" borrado. ${description}`,
+    summary: `Squad "${squadLabel(report.key, report.isGuild)}" borrado. ${description}`,
   });
 }
 
@@ -344,11 +358,54 @@ async function handleRemove(interaction) {
 async function handleRename(interaction) {
   const squadInput = interaction.options.getString('squad', true);
   const newInput = interaction.options.getString('nuevo', true);
-  const { report } = await renameSquad(interaction.guildId, squadInput, newInput);
-  const description = `"${report.oldKey.toUpperCase()}" ahora se llama "${report.newKey.toUpperCase()}".`;
 
-  await interaction.editReply({
-    embeds: [mutationEmbed({ title: 'Squad renombrado', description, actorTag: interaction.user.tag })],
+  // En un squad de gremio el nombre ES el gremio que sigue: renombrarlo
+  // cambia de gremio, y eso se avisa y se confirma antes de hacerlo.
+  const current = await describeSquad(interaction.guildId, squadInput);
+  let reply = (payload) => interaction.editReply(payload);
+  if (current.isGuild) {
+    const confirmId = `squads-rename-confirm-${interaction.id}`;
+    const cancelId = `squads-rename-cancel-${interaction.id}`;
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(confirmId).setLabel('Cambiar de gremio').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(cancelId).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+    );
+    const message = await interaction.editReply({
+      content:
+        `⚠️ **${escapeMarkdown(current.key)}** es un squad de gremio: su nombre es el gremio de Albion al que sigue. ` +
+        `Si lo renombras a **${escapeMarkdown(newInput.trim())}**, dejará de seguir a "${escapeMarkdown(current.key)}" ` +
+        `y pasará a seguir al gremio "${escapeMarkdown(newInput.trim())}". ¿Continuar?`,
+      embeds: [],
+      components: [row],
+    });
+
+    let buttonInteraction;
+    try {
+      buttonInteraction = await message.awaitMessageComponent({
+        filter: (i) => i.user.id === interaction.user.id,
+        time: CONFIRM_TIMEOUT_MS,
+      });
+    } catch {
+      await interaction.editReply({ content: 'Confirmación expirada. El squad no se renombró.', components: [] });
+      return;
+    }
+    if (buttonInteraction.customId === cancelId) {
+      await buttonInteraction.update({ content: 'Renombrado cancelado.', components: [] });
+      return;
+    }
+    await buttonInteraction.deferUpdate();
+    reply = (payload) => buttonInteraction.editReply(payload);
+  }
+
+  const { report } = await renameSquad(interaction.guildId, squadInput, newInput);
+  const description = report.isGuild
+    ? `El squad de gremio "${report.oldKey}" ahora es "${report.newKey}": sigue al gremio de Albion "${report.newKey}".`
+    : `"${report.oldKey.toUpperCase()}" ahora se llama "${report.newKey.toUpperCase()}".`;
+
+  await reply({
+    content: null,
+    embeds: [mutationEmbed({ title: 'Squad renombrado', description: escapeMarkdown(description), actorTag: interaction.user.tag })],
+    components: [],
   });
 
   await notifySquadMutation(interaction.client, {
@@ -390,49 +447,12 @@ async function handleFind(interaction) {
   await interaction.editReply({ content });
 }
 
-async function handleGuildSubcommand(interaction, subcommand) {
-  const name = interaction.options.getString('nombre', true);
-
-  if (subcommand === 'add') {
-    const { report } = await addGuild(interaction.guildId, name);
-    const description = `Se añadió "${escapeMarkdown(report.name)}" a la lista de gremios trackeados.`;
-    await interaction.editReply({
-      embeds: [mutationEmbed({ title: 'Gremio añadido', description, actorTag: interaction.user.tag })],
-    });
-    await notifySquadMutation(interaction.client, {
-      guildId: interaction.guildId,
-      actorTag: interaction.user.tag,
-      subcommand: 'guild add',
-      summary: description,
-    });
-    return;
-  }
-
-  if (subcommand === 'remove') {
-    const { report } = await removeGuild(interaction.guildId, name);
-    const description = `Se quitó "${escapeMarkdown(report.name)}" de la lista de gremios trackeados.`;
-    await interaction.editReply({
-      embeds: [mutationEmbed({ title: 'Gremio eliminado', description, actorTag: interaction.user.tag })],
-    });
-    await notifySquadMutation(interaction.client, {
-      guildId: interaction.guildId,
-      actorTag: interaction.user.tag,
-      subcommand: 'guild remove',
-      summary: description,
-    });
-    return;
-  }
-
-  throw new Error(`Subcomando de guild desconocido: ${subcommand}`);
-}
-
 /**
  * @param {import('discord.js').AutocompleteInteraction} interaction
  */
 export async function autocomplete(interaction) {
   const focused = interaction.options.getFocused(true);
   const subcommand = interaction.options.getSubcommand(false);
-  const group = interaction.options.getSubcommandGroup(false);
 
   let config;
   try {
@@ -446,7 +466,15 @@ export async function autocomplete(interaction) {
 
   if (focused.name === 'squad') {
     // create no tiene autocomplete habilitado en el builder (la clave es nueva).
-    choices = config.squadOrder.map((key) => ({ name: config.squads.get(key).display, value: key }));
+    // add/remove/move solo tienen sentido sobre squads de jugadores: los de
+    // gremio no tienen lista que editar.
+    const playersOnly = ['add', 'remove', 'move'].includes(subcommand);
+    choices = config.squadOrder
+      .filter((key) => !playersOnly || !config.squads.get(key).isGuild)
+      .map((key) => {
+        const squad = config.squads.get(key);
+        return { name: squad.isGuild ? `🛡️ ${squad.display}` : squad.display, value: key };
+      });
   } else if (focused.name === 'jugador' && subcommand === 'remove') {
     const squadInput = interaction.options.getString('squad');
     const squadKey = squadInput?.trim().toLowerCase();
@@ -455,9 +483,6 @@ export async function autocomplete(interaction) {
   } else if (focused.name === 'jugador') {
     // find / move: cualquier jugador conocido
     choices = [...config.playerToSquad.keys()].map((name) => ({ name, value: name }));
-  } else if (focused.name === 'nombre' && group === 'guild') {
-    // guild add no tiene autocomplete habilitado (nombre nuevo); solo remove.
-    choices = [...config.guilds].map((name) => ({ name, value: name }));
   }
 
   const query = focused.value.toLowerCase();

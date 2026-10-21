@@ -20,9 +20,10 @@ function formatPlayerLine(name, kills) {
 
 /**
  * Construye el value de un field de bucket: "**kills** (pct%)\nK-D: ...\n\n__Título__\n<roster>".
- * MAIN ZERG: top 5 killers. Squads: todos los jugadores presentes del bucket
- * (incluidos los de 0 kills, que quedan al final), ordenados por kills desc y
- * luego alfabéticamente.
+ * MAIN ZERG y squads de gremio: top 5 killers (pueden ser decenas de
+ * personas). Squads de jugadores: todos los presentes del bucket (incluidos
+ * los de 0 kills, que quedan al final), ordenados por kills desc y luego
+ * alfabéticamente. El porcentaje es sobre el total de SU sección.
  */
 function buildBucketValue(bucket, totalKills) {
   if (bucket.players.length === 0) return EMPTY_FIELD_VALUE;
@@ -30,10 +31,10 @@ function buildBucketValue(bucket, totalKills) {
   const percent = totalKills > 0 ? (bucket.kills / totalKills) * 100 : 0;
   const header = `**${bucket.kills}** (${percent.toFixed(1)}%)\nK-D: **${bucket.kills} - ${bucket.deaths}** Pax: ${bucket.players.length}`;
 
-  const isMain = bucket.key === 'main';
-  const rosterTitle = isMain ? 'Top killers' : 'Players';
+  const topOnly = bucket.key === 'main' || bucket.isGuild;
+  const rosterTitle = topOnly ? 'Top killers' : 'Players';
   const sorted = [...bucket.players].sort(byKillsThenName);
-  const roster = isMain ? sorted.slice(0, MAIN_ZERG_TOP_N) : sorted;
+  const roster = topOnly ? sorted.slice(0, MAIN_ZERG_TOP_N) : sorted;
 
   const lines = roster.map((p) => formatPlayerLine(p.name, p.kills));
   const prefix = `${header}\n\n__${rosterTitle}__\n`;
@@ -89,32 +90,64 @@ function packFieldsIntoChunks(fields, firstChunkBudget) {
  * @param {import('../services/aggregate.js').aggregateBattle extends (...args: any) => infer R ? R : never} params.result
  * @param {number} params.battlesProcessed
  * @param {number} params.battlesRequested
- * @param {string} params.guildsDisplay - config.guilds unidos por " / "
+ * @param {string} params.mainGuildDisplay - gremio principal del servidor (albionGuild), con su casing
  * @param {string} params.originalUrl
  * @param {Date} params.battleDate
  * @returns {EmbedBuilder[]}
  */
-export function buildKillsEmbed({ result, battlesProcessed, battlesRequested, guildsDisplay, originalUrl, battleDate }) {
+export function buildKillsEmbed({ result, battlesProcessed, battlesRequested, mainGuildDisplay, originalUrl, battleDate }) {
   const { buckets, alliance, totals } = result;
+  const guildBuckets = result.guildBuckets ?? [];
+  const followedTotals = result.followedTotals ?? { kills: 0, deaths: 0, uniquePlayers: 0 };
+  const combinedTotals = result.combinedTotals ?? totals;
+  const hasFollowed = guildBuckets.length > 0;
+  const mainName = escapeMarkdown(mainGuildDisplay);
 
+  // Las dos secciones nunca se suman en silencio: el TOTAL es solo del gremio
+  // principal, y el conjunto va en una línea aparte etiquetada como tal.
   const description = [
     `Battles processed: ${battlesProcessed}/${battlesRequested}`,
     `Friendly alliance (detected): ${escapeMarkdown(alliance) || EMPTY_FIELD_VALUE}`,
-    `Unique counted players (${escapeMarkdown(guildsDisplay)}): ${totals.uniquePlayers}`,
-    `Unique counted enemies (not in friendly alliance): ${totals.uniqueEnemies}`,
+    `Unique counted players (${mainName}): ${totals.uniquePlayers}`,
+    ...(hasFollowed ? [`Unique counted players (followed guilds): ${followedTotals.uniquePlayers}`] : []),
+    `Unique counted enemies (not in friendly alliance${hasFollowed ? ' nor in a followed guild' : ''}): ${totals.uniqueEnemies}`,
     '',
-    '**TOTAL**',
+    `**TOTAL ${mainName}**`,
     `K-D: ${totals.kills} - ${totals.deaths}`,
+    ...(hasFollowed
+      ? [
+          '',
+          '**FOLLOWED GUILDS (subtotal)**',
+          `K-D: ${followedTotals.kills} - ${followedTotals.deaths}`,
+          '',
+          `**COMBINED (${mainName} + followed guilds)**`,
+          `K-D: ${combinedTotals.kills} - ${combinedTotals.deaths} · Pax: ${combinedTotals.uniquePlayers}`,
+        ]
+      : []),
   ].join('\n');
 
   const title = '💥 Kills/Deaths per Bombsquads';
-  const footerText = `Only players in ${guildsDisplay} are counted. Enemies = players not in the detected friendly alliance.`;
+  const footerText = hasFollowed
+    ? `TOTAL = MAIN ZERG + player squads (${mainGuildDisplay} only). Followed guilds are counted separately. ` +
+      'Enemies = players not in the detected friendly alliance nor in a followed guild.'
+    : `Only players in ${mainGuildDisplay} are counted. Enemies = players not in the detected friendly alliance.`;
 
   const fields = buckets.map((bucket) => ({
     name: bucket.display,
     value: buildBucketValue(bucket, totals.kills),
     inline: true,
   }));
+
+  if (hasFollowed) {
+    fields.push({
+      name: '🤝 Followed guilds',
+      value: `Not part of the ${mainName} total. Subtotal K-D: **${followedTotals.kills} - ${followedTotals.deaths}** Pax: ${followedTotals.uniquePlayers}`,
+      inline: false,
+    });
+    for (const bucket of guildBuckets) {
+      fields.push({ name: `🛡️ ${bucket.display}`, value: buildBucketValue(bucket, followedTotals.kills), inline: true });
+    }
+  }
 
   const baseLength = title.length + description.length + footerText.length;
   const firstChunkBudget = Math.max(0, EMBED_TOTAL_MAX - baseLength);

@@ -95,10 +95,21 @@ export async function execute(interaction) {
     loadConfig(interaction.guildId).catch((error) => ({ error })),
   ]);
 
-  const squadsLine =
-    'error' in configResult
-      ? `⚠️ No se pudo cargar squads.json (${configResult.error.message})`
-      : `${configResult.squadOrder.length} squads, ${configResult.playerToSquad.size} jugadores`;
+  // Los avisos de config (jugador repetido, members en un squad de gremio...)
+  // no rompen nada y por eso no salen en ningún otro sitio: aquí sí.
+  let squadsLine;
+  if ('error' in configResult) {
+    squadsLine = `⚠️ No se pudo cargar squads.json (${configResult.error.message})`;
+  } else {
+    const guildSquads = configResult.guildToSquad.size;
+    const playerSquads = configResult.squadOrder.length - guildSquads;
+    squadsLine = [
+      `${playerSquads} squads de jugadores (${configResult.playerToSquad.size} jugadores), ${guildSquads} gremio(s) seguido(s)`,
+      ...configResult.warnings.map((warning) => `⚠️ ${warning}`),
+    ]
+      .join('\n')
+      .slice(0, 1024);
+  }
 
   const embed = new EmbedBuilder()
     .setTitle('🩺 FOAB Bot — Health')

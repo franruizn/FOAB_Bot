@@ -55,6 +55,44 @@ Si falta `GUILD_ID`, el bot **no arranca** y no mueve nada (mover los datos al
 servidor equivocado es peor que no arrancar). Si `guilds/` ya existe, no hace
 nada.
 
+## Squads de jugadores y de gremio
+
+`squads.json` tiene dos tipos de squad, y `isGuild` es obligatorio en todos:
+
+```json
+{
+  "squads": {
+    "foab":     { "isGuild": false, "members": ["FokinFran", "DanyHM"] },
+    "Dementia": { "isGuild": true,  "members": [] }
+  }
+}
+```
+
+- **De jugadores** (`isGuild: false`): una lista de nombres. Un squad recién
+  creado está vacío y sigue siendo de jugadores: cuenta cero, nunca recoge a
+  nadie por gremio.
+- **De gremio** (`isGuild: true`): **el nombre del squad es el nombre del gremio
+  de Albion** que sigue (con sus espacios y mayúsculas). `members` se ignora: los
+  miembros salen del gremio en cada batalla. Por eso **renombrar un squad de
+  gremio cambia a qué gremio sigue** (`/squads rename` lo avisa y pide
+  confirmación). Se crea con `/squads create name:<gremio> is-guild:true`; no
+  puede ser el gremio principal (`albionGuild`), que ya es MAIN ZERG.
+
+En `/getkills` son dos secciones que no se mezclan:
+
+- **Gremio principal**: `kills(MAIN ZERG) + suma(squads de jugadores) == TOTAL`.
+- **Gremios seguidos**: cada uno sobre su gremio, con su propio subtotal. No
+  entran en el TOTAL (no son del gremio principal); el conjunto sale en una línea
+  aparte, `COMBINED`. Sus jugadores no cuentan como enemigos.
+
+Si un jugador está en un squad de jugadores y además es de un gremio seguido,
+cuenta en el squad de jugadores, y queda un aviso en el log y en `/health`.
+
+Un `squads.json` en el formato viejo (squads como arrays y una lista `guilds`) se
+convierte solo la primera vez que se carga, con backup: los arrays pasan a
+`{ "isGuild": false, "members": [...] }` y los gremios de la lista vieja que no
+son el principal pasan a squads de gremio.
+
 ## Arrancar el bot
 
 ```bash
