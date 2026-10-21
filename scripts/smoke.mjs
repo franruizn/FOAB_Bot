@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { getBattle, getBattleEvents, SERVER_HOSTS } from '../src/services/albionApi.js';
-import { loadConfig, invalidateConfigCache } from '../src/services/config.js';
+import { loadConfigFromFile } from '../src/services/config.js';
 import { aggregateBattle } from '../src/services/aggregate.js';
 
 // El smoke test corre contra el fichero semilla del repo (referencia para
@@ -53,7 +53,7 @@ async function findRecentBattleId(server, guildId) {
 async function checkRealBattle() {
   console.log('\n[2] Batalla real: invariante de kills y porcentajes');
 
-  const config = await loadConfig(SQUADS_CONFIG_PATH);
+  const config = await loadConfigFromFile(SQUADS_CONFIG_PATH);
   const server = process.env.ALBION_SERVER || 'europe';
   const [firstGuildName] = [...config.guilds];
 
@@ -133,7 +133,6 @@ async function withTempConfig(content, fn) {
   try {
     return await fn(file);
   } finally {
-    invalidateConfigCache();
     await rm(dir, { recursive: true, force: true });
   }
 }
@@ -156,7 +155,7 @@ async function checkNumericAndPartialNames() {
   console.log('\n[3] Nombres numéricos ("123"/"1114") sin coincidencia parcial');
 
   await withTempConfig({ guilds: ['testguild'], squads: { raf: ['123', '1114'] } }, async (file) => {
-    const config = await loadConfig(file);
+    const config = await loadConfigFromFile(file);
     const events = [
       makeKillEvent(1, '123', 'TestGuild', 'Enemy1', 'Enemy'),
       makeKillEvent(2, '1114', 'TestGuild', 'Enemy2', 'Enemy'),
@@ -191,7 +190,7 @@ async function checkCasingMismatch() {
   console.log('\n[4] Casing distinto entre squads.json y la API del juego');
 
   await withTempConfig({ guilds: ['testguild'], squads: { raf: ['winterblatt'] } }, async (file) => {
-    const config = await loadConfig(file);
+    const config = await loadConfigFromFile(file);
     const events = [makeKillEvent(1, 'Winterblatt', 'TestGuild', 'Enemy1', 'Enemy')];
 
     const result = aggregateBattle({ events, config });

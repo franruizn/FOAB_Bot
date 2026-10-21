@@ -8,12 +8,12 @@ import * as sorteo from './commands/sorteo.js';
 import * as crearRol from './commands/crearRol.js';
 import * as dm from './commands/dm.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
-import { ensureSquadsConfig } from './dataPaths.js';
-import { waitForPendingWrites } from './services/squadsStore.js';
-import { waitForPendingRaffleWrites } from './services/rafflesStore.js';
+import { waitForAllFileWrites } from './services/fileStore.js';
+import { migrarAMultiguild } from './services/multiguildMigration.js';
+import { listarGuilds, getConfig, setConfig } from './services/guildStore.js';
 import { notifyUncontrolledError, notifyDmInterrupted } from './logChannel.js';
 import { initializeRaffles, handleRaffleReactionAdd } from './raffleScheduler.js';
-import { takeInterruptedDmSend, waitForPendingDmWrites } from './services/massDm.js';
+import { takeInterruptedDmSend } from './services/massDm.js';
 import { DM_STATE_PATH } from './dataPaths.js';
 
 const { DISCORD_TOKEN } = process.env;
@@ -62,6 +62,11 @@ for (const command of [getkills, squads, attendance, health, sorteo, crearRol, d
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Sesión iniciada como ${readyClient.user.tag}`);
   try {
+    await syncGuildNames(readyClient);
+  } catch (error) {
+    console.error('[guilds] Error sincronizando los nombres de servidor:', error?.stack ?? error);
+  }
+  try {
     await initializeRaffles(readyClient);
   } catch (error) {
     console.error('[raffle] Error inicializando sorteos pendientes:', error?.stack ?? error);
@@ -78,6 +83,21 @@ client.once(Events.ClientReady, async (readyClient) => {
     console.error('[dm] Error comprobando envíos interrumpidos:', error?.stack ?? error);
   }
 });
+
+/**
+ * Rellena/actualiza el campo "nombre" del config.json de cada servidor que
+ * ya tiene carpeta con el nombre que tiene ahora en Discord. Solo
+ * informativo (para quien abra el fichero), no crea carpetas nuevas.
+ * @param {import('discord.js').Client} readyClient
+ */
+async function syncGuildNames(readyClient) {
+  for (const guildId of await listarGuilds()) {
+    const guild = readyClient.guilds.cache.get(guildId);
+    if (!guild) continue;
+    const { nombre } = await getConfig(guildId);
+    if (nombre !== guild.name) await setConfig(guildId, { nombre: guild.name });
+  }
+}
 
 /**
  * Igual que Date#toISOString(), pero con el offset de la zona horaria del
@@ -174,6 +194,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const { known } = await handleInteractionError(interaction, error);
     if (!known) {
       await notifyUncontrolledError(client, {
+        guildId: interaction.guildId,
         commandName: interaction.commandName,
         actorTag: interaction.user.tag,
         error,
@@ -190,9 +211,10 @@ async function shutdown(signal) {
   console.log(JSON.stringify({ timestamp: isoLocal(), type: 'shutdown', msg: `Señal ${signal} recibida, cerrando...` }));
 
   try {
-    // Espera cualquier escritura de squads.json, raffles.json o dm.json ya
-    // en curso (tmp + rename) antes de desconectar, para no cortarla a mitad.
-    await Promise.all([waitForPendingWrites(), waitForPendingRaffleWrites(), waitForPendingDmWrites()]);
+    // Espera cualquier escritura ya en curso (tmp + rename) de cualquier
+    // fichero de cualquier servidor antes de desconectar, para no cortarla a
+    // mitad.
+    await waitForAllFileWrites();
   } catch (error) {
     console.error('[shutdown] Error esperando escrituras pendientes:', error?.stack ?? error);
   }
@@ -209,5 +231,8 @@ process.on('SIGTERM', () => {
   });
 });
 
-await ensureSquadsConfig();
+// Antes de conectar: si hay que migrar a la estructura multiservidor y falta
+// GUILD_ID, lanza y el bot NO arranca (mover los datos al servidor
+// equivocado es peor que no arrancar).
+await migrarAMultiguild();
 client.login(DISCORD_TOKEN);

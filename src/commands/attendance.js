@@ -1,8 +1,8 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { getGuildAttendance } from '../services/albionbbApi.js';
 import { loadConfig } from '../services/config.js';
+import { getConfig } from '../services/guildStore.js';
 import { buildAttendanceEmbed, buildPlayerNotFoundEmbed } from '../ui/attendanceEmbed.js';
-import { SQUADS_CONFIG_PATH } from '../dataPaths.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_DAYS = 30;
@@ -77,12 +77,17 @@ function suggestClosestNames(input, names, limit = SUGGESTION_COUNT) {
   return result;
 }
 
-function requireEnv() {
-  const { ALBIONBB_GUILD_ID, ALBION_SERVER } = process.env;
-  if (!ALBIONBB_GUILD_ID || !ALBION_SERVER) {
-    throw new Error('Faltan las variables de entorno ALBIONBB_GUILD_ID y/o ALBION_SERVER.');
+/**
+ * Gremio de albionbb y servidor de Albion de ESTE servidor de Discord (su
+ * config.json), no de una variable global.
+ * @param {string} discordGuildId
+ */
+async function requireAlbionbbConfig(discordGuildId) {
+  const { albionbbGuildId, albionServer } = await getConfig(discordGuildId);
+  if (!albionbbGuildId || !albionServer) {
+    throw new Error('Este servidor no tiene configurado el gremio de albionbb (albionbbGuildId) y/o el servidor de Albion (albionServer).');
   }
-  return { guildId: ALBIONBB_GUILD_ID, server: ALBION_SERVER };
+  return { albionbbGuildId, server: albionServer };
 }
 
 /**
@@ -91,12 +96,12 @@ function requireEnv() {
 export async function execute(interaction) {
   await interaction.deferReply();
 
-  const { guildId, server } = requireEnv();
+  const { albionbbGuildId, server } = await requireAlbionbbConfig(interaction.guildId);
   const playerInput = interaction.options.getString('nombre', true).trim();
   const days = interaction.options.getInteger('dias') ?? DEFAULT_DAYS;
   const dateRange = resolveDateRange(days);
 
-  const roster = await getGuildAttendance(server, guildId, dateRange);
+  const roster = await getGuildAttendance(server, albionbbGuildId, dateRange);
   const sorted = [...roster].sort((a, b) => b.attendance - a.attendance);
 
   const nameLower = playerInput.toLowerCase();
@@ -117,7 +122,7 @@ export async function execute(interaction) {
 
   let squadDisplay = null;
   try {
-    const config = await loadConfig(SQUADS_CONFIG_PATH);
+    const config = await loadConfig(interaction.guildId);
     const squadKey = config.playerToSquad.get(nameLower);
     squadDisplay = squadKey ? config.squads.get(squadKey).display : null;
   } catch (error) {
@@ -141,9 +146,9 @@ export async function autocomplete(interaction) {
   }
 
   try {
-    const { guildId, server } = requireEnv();
+    const { albionbbGuildId, server } = await requireAlbionbbConfig(interaction.guildId);
     const dateRange = resolveDateRange(DEFAULT_DAYS);
-    const roster = await getGuildAttendance(server, guildId, dateRange);
+    const roster = await getGuildAttendance(server, albionbbGuildId, dateRange);
 
     const query = focused.value.toLowerCase();
     const choices = roster

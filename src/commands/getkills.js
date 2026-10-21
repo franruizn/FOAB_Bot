@@ -4,7 +4,6 @@ import { getBattle, getBattleEvents } from '../services/albionApi.js';
 import { loadConfig } from '../services/config.js';
 import { aggregateBattle } from '../services/aggregate.js';
 import { buildKillsEmbed } from '../ui/killsEmbed.js';
-import { SQUADS_CONFIG_PATH } from '../dataPaths.js';
 
 export const data = new SlashCommandBuilder()
   .setName('getkills')
@@ -40,7 +39,7 @@ export async function execute(interaction) {
   // editReply porque deferReply() se llamó arriba.
   const url = interaction.options.getString('url', true);
   const { server, battleIds } = parseAlbionbbUrl(url);
-  const config = await loadConfig(SQUADS_CONFIG_PATH);
+  const config = await loadConfig(interaction.guildId);
 
   const events = [];
   const battles = [];

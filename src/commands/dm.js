@@ -14,7 +14,6 @@ import {
   DM_MAX_RECIPIENTS,
   DM_BODY_MAX_LENGTH,
   getDmOwnerId,
-  getDmOptOutRoleId,
   sendMassDm,
   loadDmState,
   dmBlockReason,
@@ -23,6 +22,7 @@ import {
   finishDmSend,
 } from '../services/massDm.js';
 import { DM_STATE_PATH } from '../dataPaths.js';
+import { getConfig } from '../services/guildStore.js';
 import { handleInteractionError } from '../interactionErrorHandler.js';
 import { notifyDmUnauthorized, notifyDmStarted, notifyDmFinished, notifyUncontrolledError } from '../logChannel.js';
 
@@ -85,7 +85,7 @@ export async function execute(interaction) {
       embeds: [errorEmbed('Sin permiso', 'Este comando solo lo puede usar una persona concreta. El intento queda registrado.')],
       ephemeral: true,
     });
-    await notifyDmUnauthorized(interaction.client, { actorTag: interaction.user.tag, actorId: interaction.user.id });
+    await notifyDmUnauthorized(interaction.client, { guildId: interaction.guildId, actorTag: interaction.user.tag, actorId: interaction.user.id });
     return;
   }
 
@@ -173,7 +173,7 @@ export async function execute(interaction) {
   } catch (error) {
     const { known } = await handleInteractionError(modalInteraction, error).catch(() => ({ known: false }));
     if (!known) {
-      await notifyUncontrolledError(interaction.client, { commandName: 'dm', actorTag: interaction.user.tag, error });
+      await notifyUncontrolledError(interaction.client, { guildId: interaction.guildId, commandName: 'dm', actorTag: interaction.user.tag, error });
     }
   }
 }
@@ -233,7 +233,7 @@ async function handleModalSubmit(interaction, modalInteraction, { ownerId, rol, 
   // El DM es solo lo escrito, sin cabecera de autor ni de servidor: el
   // rastro de quién lo mandó queda en el canal de logs.
   const content = body;
-  const optOutRoleId = getDmOptOutRoleId();
+  const optOutRoleId = (await getConfig(interaction.guildId)).dmOptoutRoleId;
   const optedOutCount = optOutRoleId ? recipients.filter((m) => m.roles.cache.has(optOutRoleId)).length : 0;
 
   const confirmId = `dm-confirm-${interaction.id}`;
@@ -273,7 +273,7 @@ async function handleModalSubmit(interaction, modalInteraction, { ownerId, rol, 
 
   // Segunda comprobación del cooldown, esta vez reservando: entre abrir el
   // /dm y confirmar pudo empezar otro.
-  const actor = { actorId: interaction.user.id, actorTag: interaction.user.tag, total: recipients.length };
+  const actor = { guildId: interaction.guildId, actorId: interaction.user.id, actorTag: interaction.user.tag, total: recipients.length };
   const block = await tryStartDmSend(DM_STATE_PATH, actor);
   if (block) {
     await buttonInteraction.editReply({ content: null, embeds: [errorEmbed('Espera un poco', blockMessage(block))], components: [] });
@@ -327,7 +327,7 @@ async function handleModalSubmit(interaction, modalInteraction, { ownerId, rol, 
     }
 
     await buttonInteraction.editReply({ content: null, embeds: [resultEmbed], components: [] }).catch(() => {});
-    await notifyDmFinished(interaction.client, { actorTag: interaction.user.tag, summary });
+    await notifyDmFinished(interaction.client, { guildId: interaction.guildId, actorTag: interaction.user.tag, summary });
   } finally {
     await finishDmSend(DM_STATE_PATH);
   }

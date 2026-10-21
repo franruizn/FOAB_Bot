@@ -1,12 +1,21 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-// isOfficer() lee OFFICER_ROLE_ID de process.env en el momento de la
-// llamada (no del import), así que basta con fijarlo antes de invocar
-// execute(); no hace falta el patrón de mkdtemp + DATA_DIR de
-// raffleScheduler.test.js porque este caso vuelve pronto, antes de tocar
-// raffles.json.
-process.env.OFFICER_ROLE_ID = 'officer-role';
+import { mkdtemp, rm } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+
+// isOfficer() lee officerRoleId del config.json del servidor: DATA_DIR
+// temporal (fijado ANTES de importar nada que lo lea) con ese rol puesto.
+const DATA_DIR = await mkdtemp(path.join(os.tmpdir(), 'sorteo-cmd-test-'));
+process.env.DATA_DIR = DATA_DIR;
+const GUILD_ID = '100000000000000001';
+
+const { setConfig } = await import('../services/guildStore.js');
+await setConfig(GUILD_ID, { officerRoleId: 'officer-role' });
+after(async () => {
+  await rm(DATA_DIR, { recursive: true, force: true });
+});
 
 const { execute } = await import('./sorteo.js');
 
@@ -14,7 +23,7 @@ function makeFakeInteraction({ rol }) {
   const replies = [];
   const channelSends = [];
   return {
-    guildId: 'guild-1',
+    guildId: GUILD_ID,
     channelId: 'chan-1',
     member: { roles: { cache: new Map([['officer-role', true]]) } },
     user: { id: 'creator-1' },
@@ -39,7 +48,7 @@ function makeFakeInteraction({ rol }) {
 
 test('/sorteo: @everyone como rol se rechaza (equivale a no filtrar y confunde)', async () => {
   // El rol @everyone SIEMPRE tiene el mismo id que el guild.
-  const everyoneRole = { id: 'guild-1' };
+  const everyoneRole = { id: GUILD_ID };
   const interaction = makeFakeInteraction({ rol: everyoneRole });
 
   await execute(interaction);

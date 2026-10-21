@@ -14,7 +14,6 @@ import {
 import { mutationEmbed, infoEmbed } from '../ui/squadsEmbed.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
 import { isOfficer } from '../permissions.js';
-import { SQUADS_CONFIG_PATH } from '../dataPaths.js';
 import { notifySquadMutation } from '../logChannel.js';
 
 const READ_ONLY_SUBCOMMANDS = new Set(['list', 'show', 'find']);
@@ -22,7 +21,7 @@ const CONFIRM_TIMEOUT_MS = 30_000;
 const AUTOCOMPLETE_LIMIT = 25;
 
 // Visible para todos en el picker de Discord a propósito: el filtro real es
-// isOfficer() (OFFICER_ROLE_ID) en runtime, no un permiso de Discord por
+// isOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder()
   .setName('squads')
@@ -104,7 +103,7 @@ export const data = new SlashCommandBuilder()
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 export async function execute(interaction) {
-  if (!isOfficer(interaction)) {
+  if (!(await isOfficer(interaction))) {
     await interaction.reply({
       embeds: [errorEmbed('Sin permiso', 'Este comando es solo para el rol de oficiales.')],
       ephemeral: true,
@@ -173,7 +172,7 @@ export async function execute(interaction) {
 }
 
 async function handleList(interaction) {
-  const config = await loadConfig(SQUADS_CONFIG_PATH);
+  const config = await loadConfig(interaction.guildId);
   const lines = config.squadOrder.map((key) => {
     const squad = config.squads.get(key);
     return `**${squad.display}** — ${squad.members.size} miembro(s)`;
@@ -185,7 +184,7 @@ async function handleList(interaction) {
 }
 
 async function handleShow(interaction) {
-  const config = await loadConfig(SQUADS_CONFIG_PATH);
+  const config = await loadConfig(interaction.guildId);
   const key = interaction.options.getString('squad', true).trim().toLowerCase();
   const squad = config.squads.get(key);
   if (!squad) throw new SquadCommandError(`El squad "${key}" no existe.`);
@@ -200,7 +199,7 @@ async function handleShow(interaction) {
 
 async function handleCreate(interaction) {
   const input = interaction.options.getString('squad', true);
-  const { report } = await createSquad(SQUADS_CONFIG_PATH, input);
+  const { report } = await createSquad(interaction.guildId, input);
   const description = 'Sin miembros todavía. Usa `/squads add` para añadir jugadores.';
 
   await interaction.editReply({
@@ -214,6 +213,7 @@ async function handleCreate(interaction) {
   });
 
   await notifySquadMutation(interaction.client, {
+    guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'create',
     summary: `Squad "${report.key.toUpperCase()}" creado. ${description}`,
@@ -223,7 +223,7 @@ async function handleCreate(interaction) {
 async function handleDelete(interaction) {
   const input = interaction.options.getString('squad', true);
   const key = input.trim().toLowerCase();
-  const config = await loadConfig(SQUADS_CONFIG_PATH);
+  const config = await loadConfig(interaction.guildId);
   const squad = config.squads.get(key);
   if (!squad) throw new SquadCommandError(`El squad "${key}" no existe.`);
 
@@ -257,7 +257,7 @@ async function handleDelete(interaction) {
     return;
   }
 
-  const { report } = await deleteSquad(SQUADS_CONFIG_PATH, key);
+  const { report } = await deleteSquad(interaction.guildId, key);
   const description = `Tenía ${report.removedMembers.length} miembro(s).`;
   await buttonInteraction.update({
     content: null,
@@ -272,6 +272,7 @@ async function handleDelete(interaction) {
   });
 
   await notifySquadMutation(interaction.client, {
+    guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'delete',
     summary: `Squad "${report.key.toUpperCase()}" borrado. ${description}`,
@@ -281,7 +282,7 @@ async function handleDelete(interaction) {
 async function handleAdd(interaction) {
   const squadInput = interaction.options.getString('squad', true);
   const playersInput = interaction.options.getString('jugadores', true);
-  const { report } = await addPlayers(SQUADS_CONFIG_PATH, squadInput, playersInput);
+  const { report } = await addPlayers(interaction.guildId, squadInput, playersInput);
 
   const lines = [];
   if (report.added.length > 0) {
@@ -309,6 +310,7 @@ async function handleAdd(interaction) {
   });
 
   await notifySquadMutation(interaction.client, {
+    guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'add',
     summary: `Squad "${report.key.toUpperCase()}": ${description}`,
@@ -318,7 +320,7 @@ async function handleAdd(interaction) {
 async function handleRemove(interaction) {
   const squadInput = interaction.options.getString('squad', true);
   const playerInput = interaction.options.getString('jugador', true);
-  const { report } = await removePlayer(SQUADS_CONFIG_PATH, squadInput, playerInput);
+  const { report } = await removePlayer(interaction.guildId, squadInput, playerInput);
   const description = `Se quitó a ${escapeMarkdown(report.removedName)}.`;
 
   await interaction.editReply({
@@ -332,6 +334,7 @@ async function handleRemove(interaction) {
   });
 
   await notifySquadMutation(interaction.client, {
+    guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'remove',
     summary: `Squad "${report.key.toUpperCase()}": ${description}`,
@@ -341,7 +344,7 @@ async function handleRemove(interaction) {
 async function handleRename(interaction) {
   const squadInput = interaction.options.getString('squad', true);
   const newInput = interaction.options.getString('nuevo', true);
-  const { report } = await renameSquad(SQUADS_CONFIG_PATH, squadInput, newInput);
+  const { report } = await renameSquad(interaction.guildId, squadInput, newInput);
   const description = `"${report.oldKey.toUpperCase()}" ahora se llama "${report.newKey.toUpperCase()}".`;
 
   await interaction.editReply({
@@ -349,6 +352,7 @@ async function handleRename(interaction) {
   });
 
   await notifySquadMutation(interaction.client, {
+    guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'rename',
     summary: description,
@@ -358,7 +362,7 @@ async function handleRename(interaction) {
 async function handleMove(interaction) {
   const playerInput = interaction.options.getString('jugador', true);
   const squadInput = interaction.options.getString('squad', true);
-  const { report } = await movePlayer(SQUADS_CONFIG_PATH, playerInput, squadInput);
+  const { report } = await movePlayer(interaction.guildId, playerInput, squadInput);
   const description = `${escapeMarkdown(report.name)}: "${report.fromKey.toUpperCase()}" → "${report.toKey.toUpperCase()}".`;
 
   await interaction.editReply({
@@ -366,6 +370,7 @@ async function handleMove(interaction) {
   });
 
   await notifySquadMutation(interaction.client, {
+    guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     subcommand: 'move',
     summary: description,
@@ -373,7 +378,7 @@ async function handleMove(interaction) {
 }
 
 async function handleFind(interaction) {
-  const config = await loadConfig(SQUADS_CONFIG_PATH);
+  const config = await loadConfig(interaction.guildId);
   const playerInput = interaction.options.getString('jugador', true).trim();
   const nameLower = playerInput.toLowerCase();
   const squadKey = config.playerToSquad.get(nameLower);
@@ -389,12 +394,13 @@ async function handleGuildSubcommand(interaction, subcommand) {
   const name = interaction.options.getString('nombre', true);
 
   if (subcommand === 'add') {
-    const { report } = await addGuild(SQUADS_CONFIG_PATH, name);
+    const { report } = await addGuild(interaction.guildId, name);
     const description = `Se añadió "${escapeMarkdown(report.name)}" a la lista de gremios trackeados.`;
     await interaction.editReply({
       embeds: [mutationEmbed({ title: 'Gremio añadido', description, actorTag: interaction.user.tag })],
     });
     await notifySquadMutation(interaction.client, {
+      guildId: interaction.guildId,
       actorTag: interaction.user.tag,
       subcommand: 'guild add',
       summary: description,
@@ -403,12 +409,13 @@ async function handleGuildSubcommand(interaction, subcommand) {
   }
 
   if (subcommand === 'remove') {
-    const { report } = await removeGuild(SQUADS_CONFIG_PATH, name);
+    const { report } = await removeGuild(interaction.guildId, name);
     const description = `Se quitó "${escapeMarkdown(report.name)}" de la lista de gremios trackeados.`;
     await interaction.editReply({
       embeds: [mutationEmbed({ title: 'Gremio eliminado', description, actorTag: interaction.user.tag })],
     });
     await notifySquadMutation(interaction.client, {
+      guildId: interaction.guildId,
       actorTag: interaction.user.tag,
       subcommand: 'guild remove',
       summary: description,
@@ -429,7 +436,7 @@ export async function autocomplete(interaction) {
 
   let config;
   try {
-    config = await loadConfig(SQUADS_CONFIG_PATH);
+    config = await loadConfig(interaction.guildId);
   } catch {
     await interaction.respond([]);
     return;

@@ -38,7 +38,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// --- caché de 15 min por guildId + rango de fechas (+ minPlayers) ---
+// --- caché de 15 min por gremio de albionbb + rango de fechas (+ minPlayers) ---
+//
+// Compartida entre servidores de Discord A PROPÓSITO: la respuesta depende
+// solo de la clave (gremio de albionbb, rango), no de quién pregunta.
 
 const cacheStore = new Map();
 
@@ -57,6 +60,7 @@ function cacheSet(key, value) {
 }
 
 // --- rate limit global: como mucho 1 petición cada 2s, en cola ---
+// Global (no por servidor de Discord) a propósito: el límite es de albionbb.
 
 let lastRequestAt = 0;
 let requestQueue = Promise.resolve();

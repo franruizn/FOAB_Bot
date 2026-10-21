@@ -15,7 +15,7 @@ function contieneMencionMasiva(texto) {
 }
 
 // Visible para todos en el picker de Discord a propósito: el filtro real es
-// isOfficer() (OFFICER_ROLE_ID) en runtime, no un permiso de Discord por
+// isOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder()
   .setName('crear-rol')
@@ -32,7 +32,7 @@ export const data = new SlashCommandBuilder()
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 export async function execute(interaction) {
-  if (!isOfficer(interaction)) {
+  if (!(await isOfficer(interaction))) {
     await interaction.reply({
       embeds: [errorEmbed('Sin permiso', 'Este comando es solo para el rol de oficiales.')],
       ephemeral: true,
@@ -171,6 +171,7 @@ export async function execute(interaction) {
   });
 
   await notifyRoleCreation(interaction.client, {
+    guildId: interaction.guildId,
     actorTag: interaction.user.tag,
     roleMention: `<@&${role.id}>`,
     assignedCount,

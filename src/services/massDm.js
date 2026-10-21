@@ -1,4 +1,4 @@
-import { createMutex, readJsonFile, atomicWriteJson } from './fileStore.js';
+import { withFileLock, readJsonFile, atomicWriteJson } from './fileStore.js';
 
 // Lógica de /dm separada del comando: el envío secuencial y el estado
 // persistido (cooldown + envío en curso).
@@ -27,19 +27,14 @@ export function getDmOwnerId() {
   return ownerId.length > 0 ? ownerId : null;
 }
 
-/** @returns {string | null} */
-export function getDmOptOutRoleId() {
-  const roleId = (process.env.DM_OPTOUT_ROLE_ID ?? '').trim();
-  return roleId.length > 0 ? roleId : null;
-}
-
 /**
  * Manda `content` por DM a cada destinatario, UNO A UNO y con una pausa de
  * `delayMs` entre envíos: abrir 150 canales de DM en ráfaga es justo el
  * patrón que dispara los límites anti-spam de Discord.
  *
  * - Bots: se saltan (no cuentan como envío, sin pausa).
- * - Rol de exclusión (DM_OPTOUT_ROLE_ID): se salta y se reporta.
+ * - Rol de exclusión (dmOptoutRoleId de la config del servidor): se salta y
+ *   se reporta.
  * - DMs cerrados (código 50007) u otro fallo: se reporta y se sigue con el
  *   resto, nunca detiene el envío.
  *
@@ -113,7 +108,7 @@ export async function sendMassDm({
 
 // --- Estado persistido (DATA_DIR/dm.json) ---
 //
-// { lastStartedAt: number | null, inProgress: null | { startedAt, actorId,
+// { lastStartedAt: number | null, inProgress: null | { startedAt, guildId, actorId,
 //   actorTag, total, sentIds: string[] } }
 //
 // lastStartedAt alimenta el cooldown (y sobrevive a un reinicio: reiniciar
@@ -123,16 +118,13 @@ export async function sendMassDm({
 // reenviar duplicados a quien ya lo recibió es peor que no enviar.
 
 const DEFAULT_STATE = { lastStartedAt: null, inProgress: null };
-const { withWriteLock, waitForPendingWrites } = createMutex();
-
-export const waitForPendingDmWrites = waitForPendingWrites;
 
 export async function loadDmState(filePath) {
   return { ...DEFAULT_STATE, ...(await readJsonFile(filePath, DEFAULT_STATE)) };
 }
 
 function mutateDmState(filePath, mutateFn) {
-  return withWriteLock(async () => {
+  return withFileLock(filePath, async () => {
     const current = await loadDmState(filePath);
     const { next, result } = mutateFn(current);
     if (next) await atomicWriteJson(filePath, next);
@@ -159,12 +151,12 @@ export function dmBlockReason(state, now = Date.now()) {
  * no pueden pasar las dos.
  * @returns {Promise<ReturnType<typeof dmBlockReason>>} null si se reservó
  */
-export function tryStartDmSend(filePath, { actorId, actorTag, total }, now = Date.now()) {
+export function tryStartDmSend(filePath, { guildId, actorId, actorTag, total }, now = Date.now()) {
   return mutateDmState(filePath, (state) => {
     const blocked = dmBlockReason(state, now);
     if (blocked) return { next: null, result: blocked };
     return {
-      next: { ...state, lastStartedAt: now, inProgress: { startedAt: now, actorId, actorTag, total, sentIds: [] } },
+      next: { ...state, lastStartedAt: now, inProgress: { startedAt: now, guildId, actorId, actorTag, total, sentIds: [] } },
       result: null,
     };
   });
@@ -187,7 +179,7 @@ export function finishDmSend(filePath) {
 /**
  * Al arrancar: si quedó un envío a medias, lo devuelve y lo borra del estado
  * (el cooldown se conserva). NO lo reanuda.
- * @returns {Promise<null | { startedAt: number, actorId: string, actorTag: string, total: number, sentIds: string[] }>}
+ * @returns {Promise<null | { startedAt: number, guildId?: string, actorId: string, actorTag: string, total: number, sentIds: string[] }>}
  */
 export function takeInterruptedDmSend(filePath) {
   return mutateDmState(filePath, (state) => {

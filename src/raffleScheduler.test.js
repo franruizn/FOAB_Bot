@@ -9,7 +9,8 @@ process.env.DATA_DIR = DATA_DIR;
 
 const { resolveRaffle, scheduleRaffleResolution, initializeRaffles } = await import('./raffleScheduler.js');
 const { loadRaffles, addRaffle } = await import('./services/rafflesStore.js');
-const { RAFFLES_PATH } = await import('./dataPaths.js');
+// Servidor por defecto de los sorteos sin rol (los de rol traen el suyo).
+const DEFAULT_GUILD_ID = '100000000000000001';
 
 after(async () => {
   await rm(DATA_DIR, { recursive: true, force: true });
@@ -149,7 +150,7 @@ test('resolveRaffle(): "ha ganado el sorteo de <@creatorId>" usa raffle.creatorI
   announcement.addReaction('🎉', [new FakeUser('p1'), new FakeUser('p2')]);
   channel.store.set(announcement.id, announcement);
 
-  const raffle = { id: 'raffle-1', channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-1' };
+  const raffle = { id: 'raffle-1', guildId: DEFAULT_GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-1' };
 
   await resolveRaffle(client, raffle);
 
@@ -168,15 +169,15 @@ test('resolveRaffle(): sin ningún participante, avisa y no menciona a nadie', a
   announcement.addReaction('🎉', []);
   channel.store.set(announcement.id, announcement);
 
-  const raffle = { id: 'raffle-2', channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-2' };
-  await addRaffle(RAFFLES_PATH, raffle);
+  const raffle = { id: 'raffle-2', guildId: DEFAULT_GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-2' };
+  await addRaffle(raffle);
 
   await resolveRaffle(client, raffle);
 
   const payload = channel.sentPayloads.at(-1);
   assert.equal(payload.content, undefined, 'sin participantes no hay texto plano con menciones, solo el embed');
   assert.match(payload.embeds[0].toJSON().description, /Nadie participó/);
-  assert.ok(!(await loadRaffles(RAFFLES_PATH)).some((r) => r.id === 'raffle-2'), 'debe quitarse de raffles.json');
+  assert.ok(!(await loadRaffles(DEFAULT_GUILD_ID)).some((r) => r.id === 'raffle-2'), 'debe quitarse de raffles.json');
 });
 
 test('resolveRaffle(): filtra bots y pagina reacciones por encima de 100', async () => {
@@ -190,7 +191,7 @@ test('resolveRaffle(): filtra bots y pagina reacciones por encima de 100', async
   announcement.addReaction('🎉', reactors);
   channel.store.set(announcement.id, announcement);
 
-  const raffle = { id: 'raffle-3', channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-3' };
+  const raffle = { id: 'raffle-3', guildId: DEFAULT_GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, creatorId: 'creator-3' };
   await resolveRaffle(client, raffle);
 
   const content = lastContent(channel);
@@ -211,7 +212,7 @@ test('scheduleRaffleResolution(): al vencer, resuelve usando raffle.creatorId (s
   announcement.addReaction('🎉', [new FakeUser('p1')]);
   channel.store.set(announcement.id, announcement);
 
-  const raffle = { id: 'raffle-4', channelId: CHANNEL_ID, messageId: announcement.id, endsAt: Date.now() + 50, creatorId: 'creator-4' };
+  const raffle = { id: 'raffle-4', guildId: DEFAULT_GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, endsAt: Date.now() + 50, creatorId: 'creator-4' };
   scheduleRaffleResolution(client, raffle);
 
   await wait(200);
@@ -234,8 +235,8 @@ test('initializeRaffles(): un sorteo cuyo plazo ya pasó se resuelve YA, marcado
   announcement.addReaction('🎉', [new FakeUser('p1')]);
   channel.store.set(announcement.id, announcement);
 
-  const raffle = { id: 'raffle-5', channelId: CHANNEL_ID, messageId: announcement.id, endsAt: Date.now() - 1000, creatorId: 'creator-5' };
-  await addRaffle(RAFFLES_PATH, raffle);
+  const raffle = { id: 'raffle-5', guildId: DEFAULT_GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, endsAt: Date.now() - 1000, creatorId: 'creator-5' };
+  await addRaffle(raffle);
 
   await initializeRaffles(client);
 
@@ -254,8 +255,8 @@ test('initializeRaffles(): un sorteo que sigue vivo se reprograma y, al vencer, 
   announcement.addReaction('🎉', [new FakeUser('p1')]);
   channel.store.set(announcement.id, announcement);
 
-  const raffle = { id: 'raffle-6', channelId: CHANNEL_ID, messageId: announcement.id, endsAt: Date.now() + 80, creatorId: 'creator-6' };
-  await addRaffle(RAFFLES_PATH, raffle);
+  const raffle = { id: 'raffle-6', guildId: DEFAULT_GUILD_ID, channelId: CHANNEL_ID, messageId: announcement.id, endsAt: Date.now() + 80, creatorId: 'creator-6' };
+  await addRaffle(raffle);
 
   await initializeRaffles(client);
   assert.equal(channel.sentPayloads.length, 0, 'todavía no debe haberse resuelto: le quedaba tiempo');
@@ -273,7 +274,7 @@ test('initializeRaffles(): un sorteo que sigue vivo se reprograma y, al vencer, 
 
 test('resolveRaffle(): con rol, solo quienes lo tienen entran en las tiradas (y el footer lo cuenta)', async () => {
   const CHANNEL_ID = 'channel-role-1';
-  const GUILD_ID = 'guild-role-1';
+  const GUILD_ID = '200000000000000001';
   const ROLE_ID = 'role-1';
   const channel = new FakeChannel(CHANNEL_ID);
   // p1 y p2 tienen el rol; p3 reaccionó pero no lo tiene.
@@ -303,7 +304,7 @@ test('resolveRaffle(): con rol, solo quienes lo tienen entran en las tiradas (y 
 
 test('resolveRaffle(): un usuario que perdió el rol durante el sorteo queda descartado', async () => {
   const CHANNEL_ID = 'channel-role-2';
-  const GUILD_ID = 'guild-role-2';
+  const GUILD_ID = '200000000000000002';
   const ROLE_ID = 'role-2';
   const channel = new FakeChannel(CHANNEL_ID);
   // p2 reaccionó cuando tenía el rol, pero ya no lo tiene al resolver.
@@ -329,7 +330,7 @@ test('resolveRaffle(): un usuario que perdió el rol durante el sorteo queda des
 
 test('resolveRaffle(): un usuario que se fue del servidor queda descartado sin fallar', async () => {
   const CHANNEL_ID = 'channel-role-3';
-  const GUILD_ID = 'guild-role-3';
+  const GUILD_ID = '200000000000000003';
   const ROLE_ID = 'role-3';
   const channel = new FakeChannel(CHANNEL_ID);
   // p2 reaccionó pero ya no está en el guild: members.fetch('p2') rechaza.
@@ -352,7 +353,7 @@ test('resolveRaffle(): un usuario que se fue del servidor queda descartado sin f
 
 test('resolveRaffle(): con rol, si nadie de los que reaccionaron lo tiene, lo dice explícitamente (no es un sorteo vacío)', async () => {
   const CHANNEL_ID = 'channel-role-4';
-  const GUILD_ID = 'guild-role-4';
+  const GUILD_ID = '200000000000000004';
   const ROLE_ID = 'role-4';
   const channel = new FakeChannel(CHANNEL_ID);
   const guild = new FakeGuild(GUILD_ID, {
@@ -378,7 +379,7 @@ test('resolveRaffle(): con rol, si nadie de los que reaccionaron lo tiene, lo di
 
 test('resolveRaffle(): si el rol se borró antes de resolver, resuelve sin participantes y lo explica sin reventar', async () => {
   const CHANNEL_ID = 'channel-role-5';
-  const GUILD_ID = 'guild-role-5';
+  const GUILD_ID = '200000000000000005';
   const ROLE_ID = 'role-deleted';
   const channel = new FakeChannel(CHANNEL_ID);
   // El guild existe, pero el rol ya no está entre sus roles.
@@ -404,7 +405,7 @@ test('resolveRaffle(): si el rol se borró antes de resolver, resuelve sin parti
 
 test('initializeRaffles(): un sorteo con rol reanudado tras un reinicio sigue filtrando por ese rol', async () => {
   const CHANNEL_ID = 'channel-role-6';
-  const GUILD_ID = 'guild-role-6';
+  const GUILD_ID = '200000000000000006';
   const ROLE_ID = 'role-6';
   const channel = new FakeChannel(CHANNEL_ID);
   const guild = new FakeGuild(GUILD_ID, {
@@ -431,7 +432,7 @@ test('initializeRaffles(): un sorteo con rol reanudado tras un reinicio sigue fi
     creatorId: 'creator-6',
     roleId: ROLE_ID,
   };
-  await addRaffle(RAFFLES_PATH, raffle);
+  await addRaffle(raffle);
 
   await initializeRaffles(client);
 

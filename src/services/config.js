@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
+import { rutaDe } from './guildStore.js';
 
 const MIN_NAME_LENGTH = 3;
 const MAX_NAME_LENGTH = 16;
@@ -28,8 +29,10 @@ export class ConfigError extends Error {
  * @property {string[]} warnings - avisos no bloqueantes (ej. jugador repetido en varios squads)
  */
 
-/** @type {{ path: string, mtimeMs: number, data: ConfigData } | null} */
-let cache = null;
+// Indexada por guildId: una caché suelta devolvería los squads de otro
+// servidor sin dar ningún error.
+/** @type {Map<string, { mtimeMs: number, data: ConfigData }>} */
+const cache = new Map();
 
 export { MIN_NAME_LENGTH, MAX_NAME_LENGTH };
 
@@ -144,12 +147,13 @@ export function normalizeConfig(raw, path) {
 }
 
 /**
- * Carga (y cachea) el archivo de configuración de squads/guilds desde `path`.
+ * Lee y valida un squads.json concreto, SIN caché. Para scripts y tests que
+ * trabajan con un fichero suelto; el bot usa loadConfig(guildId).
  * @param {string} path
- * @returns {Promise<ConfigData>}
+ * @returns {Promise<{ mtimeMs: number, data: ConfigData }>}
  * @throws {ConfigError} si el archivo no existe o no valida
  */
-export async function loadConfig(path) {
+async function readConfigFile(path) {
   let stats;
   try {
     stats = await stat(path);
@@ -158,10 +162,6 @@ export async function loadConfig(path) {
       path,
       reason: error.code === 'ENOENT' ? 'not_found' : 'stat_error',
     });
-  }
-
-  if (cache && cache.path === path && cache.mtimeMs === stats.mtimeMs) {
-    return cache.data;
   }
 
   let raw;
@@ -175,15 +175,44 @@ export async function loadConfig(path) {
     });
   }
 
-  const data = normalizeConfig(raw, path);
-  cache = { path, mtimeMs: stats.mtimeMs, data };
+  return { mtimeMs: stats.mtimeMs, data: normalizeConfig(raw, path) };
+}
+
+/**
+ * @param {string} path
+ * @returns {Promise<ConfigData>}
+ * @throws {ConfigError}
+ */
+export async function loadConfigFromFile(path) {
+  return (await readConfigFile(path)).data;
+}
+
+/**
+ * Carga (y cachea) el squads.json del servidor `guildId`.
+ * @param {string} guildId
+ * @returns {Promise<ConfigData>}
+ * @throws {ConfigError} si el archivo no existe o no valida
+ */
+export async function loadConfig(guildId) {
+  const path = rutaDe(guildId, 'squads.json');
+
+  const cached = cache.get(guildId);
+  if (cached) {
+    const stats = await stat(path).catch(() => null);
+    if (stats && stats.mtimeMs === cached.mtimeMs) return cached.data;
+  }
+
+  const { mtimeMs, data } = await readConfigFile(path);
+  cache.set(guildId, { mtimeMs, data });
   return data;
 }
 
 /**
- * Invalida la caché en memoria de loadConfig, forzando una relectura del
- * archivo en la próxima llamada. Debe invocarse tras editar squads.json.
+ * Invalida la caché en memoria de loadConfig para UN servidor, forzando una
+ * relectura de su squads.json en la próxima llamada. Debe invocarse tras
+ * editarlo. Los demás servidores no se tocan.
+ * @param {string} guildId
  */
-export function invalidateConfigCache() {
-  cache = null;
+export function invalidateConfigCache(guildId) {
+  cache.delete(guildId);
 }

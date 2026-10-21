@@ -1,9 +1,8 @@
-import { readFile, writeFile, rename, mkdir, readdir, unlink, copyFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { normalizeConfig, invalidateConfigCache, isValidPlayerName, MIN_NAME_LENGTH, MAX_NAME_LENGTH } from './config.js';
+import { withFileLock, backupCurrentFile, atomicWriteJson } from './fileStore.js';
+import { rutaDe } from './guildStore.js';
 
-const BACKUP_DIR_NAME = 'backups';
-const MAX_BACKUPS = 10;
 const SQUAD_KEY_MAX_LENGTH = 32;
 
 export class SquadCommandError extends Error {
@@ -11,30 +10,6 @@ export class SquadCommandError extends Error {
     super(message);
     this.name = 'SquadCommandError';
   }
-}
-
-// --- mutex de escritura: una cadena de promesas serializa todas las mutaciones ---
-
-let writeTail = Promise.resolve();
-
-function withWriteLock(task) {
-  const run = writeTail.then(task, task);
-  writeTail = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
-
-/**
- * Devuelve una promesa que se resuelve cuando termina la última escritura
- * encolada en este momento (éxito o fallo). Pensado para el shutdown por
- * SIGTERM: esperar esto antes de salir evita cortar un fs.rename() a mitad.
- * No espera escrituras que se encolen DESPUÉS de llamarlo.
- * @returns {Promise<void>}
- */
-export function waitForPendingWrites() {
-  return writeTail;
 }
 
 // --- validación de entrada de usuario ---
@@ -88,54 +63,34 @@ async function readRawConfig(filePath) {
   return JSON.parse(content);
 }
 
-async function backupCurrentFile(filePath) {
-  const backupDir = path.join(path.dirname(filePath), BACKUP_DIR_NAME);
-  await mkdir(backupDir, { recursive: true });
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  await copyFile(filePath, path.join(backupDir, `squads-${timestamp}.json`));
-
-  const entries = (await readdir(backupDir))
-    .filter((name) => name.startsWith('squads-') && name.endsWith('.json'))
-    .sort(); // timestamps ISO -> orden lexicográfico == orden cronológico
-
-  const excess = entries.length - MAX_BACKUPS;
-  for (let i = 0; i < excess; i++) {
-    await unlink(path.join(backupDir, entries[i]));
-  }
-}
-
-async function atomicWrite(filePath, data) {
-  const tmpPath = `${filePath}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf8');
-  await rename(tmpPath, filePath);
-}
-
 /**
- * Aplica una mutación al fichero de squads de forma segura:
- * 1. serializa con las demás escrituras concurrentes (mutex),
+ * Aplica una mutación al squads.json del servidor `guildId` de forma segura:
+ * 1. serializa con las demás escrituras de ESE fichero (otros servidores no
+ *    esperan),
  * 2. lee el fichero actual del disco (nunca de la caché de config.js),
  * 3. ejecuta mutateFn sobre una copia y valida el resultado con el mismo
  *    validador que usa loadConfig ANTES de tocar nada en disco,
- * 4. hace backup del fichero actual y solo entonces escribe atómicamente
- *    (tmp + rename), conservando las últimas 10 copias,
- * 5. invalida la caché de loadConfig.
+ * 4. hace backup del fichero actual (en la carpeta backups/ del servidor) y
+ *    solo entonces escribe atómicamente (tmp + rename), conservando las
+ *    últimas 10 copias,
+ * 5. invalida la caché de loadConfig de ese servidor.
  *
- * @param {string} filePath
+ * @param {string} guildId
  * @param {(raw: {guilds: string[], squads: Record<string, string[]>}) => { data: object, report: object }} mutateFn
  * @returns {Promise<{ data: object, report: object }>}
  */
-export async function mutateSquadsConfig(filePath, mutateFn) {
-  return withWriteLock(async () => {
+export async function mutateSquadsConfig(guildId, mutateFn) {
+  const filePath = rutaDe(guildId, 'squads.json');
+  return withFileLock(filePath, async () => {
     const raw = await readRawConfig(filePath);
     const { data, report } = mutateFn(structuredClone(raw));
 
     // Si esto lanza (ConfigError), no se toca el fichero original.
     normalizeConfig(data, filePath);
 
-    await backupCurrentFile(filePath);
-    await atomicWrite(filePath, data);
-    invalidateConfigCache();
+    await backupCurrentFile(filePath, 'squads');
+    await atomicWriteJson(filePath, data);
+    invalidateConfigCache(guildId);
 
     return { data, report };
   });
@@ -143,9 +98,9 @@ export async function mutateSquadsConfig(filePath, mutateFn) {
 
 // --- mutaciones de alto nivel ---
 
-export async function createSquad(filePath, squadKeyInput) {
+export async function createSquad(guildId, squadKeyInput) {
   const key = normalizeSquadKey(squadKeyInput);
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     if (findSquadKeyCaseInsensitive(raw, key)) {
       throw new SquadCommandError(`El squad "${key}" ya existe.`);
     }
@@ -153,9 +108,9 @@ export async function createSquad(filePath, squadKeyInput) {
   });
 }
 
-export async function deleteSquad(filePath, squadKeyInput) {
+export async function deleteSquad(guildId, squadKeyInput) {
   const key = normalizeSquadKey(squadKeyInput);
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     const existingKey = findSquadKeyCaseInsensitive(raw, key);
     if (!existingKey) {
       throw new SquadCommandError(`El squad "${key}" no existe.`);
@@ -167,7 +122,7 @@ export async function deleteSquad(filePath, squadKeyInput) {
   });
 }
 
-export async function addPlayers(filePath, squadKeyInput, playerNamesInput) {
+export async function addPlayers(guildId, squadKeyInput, playerNamesInput) {
   const key = normalizeSquadKey(squadKeyInput);
   const requestedNames = String(playerNamesInput)
     .split(',')
@@ -180,7 +135,7 @@ export async function addPlayers(filePath, squadKeyInput, playerNamesInput) {
 
   const normalizedNames = requestedNames.map(normalizePlayerName);
 
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     const existingKey = findSquadKeyCaseInsensitive(raw, key);
     if (!existingKey) {
       throw new SquadCommandError(`El squad "${key}" no existe. Créalo antes con /squads create.`);
@@ -216,11 +171,11 @@ export async function addPlayers(filePath, squadKeyInput, playerNamesInput) {
   });
 }
 
-export async function removePlayer(filePath, squadKeyInput, playerNameInput) {
+export async function removePlayer(guildId, squadKeyInput, playerNameInput) {
   const key = normalizeSquadKey(squadKeyInput);
   const nameLower = String(playerNameInput).trim().toLowerCase();
 
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     const existingKey = findSquadKeyCaseInsensitive(raw, key);
     if (!existingKey) {
       throw new SquadCommandError(`El squad "${key}" no existe.`);
@@ -239,11 +194,11 @@ export async function removePlayer(filePath, squadKeyInput, playerNameInput) {
   });
 }
 
-export async function renameSquad(filePath, squadKeyInput, newKeyInput) {
+export async function renameSquad(guildId, squadKeyInput, newKeyInput) {
   const oldKeyNormalized = normalizeSquadKey(squadKeyInput);
   const newKey = normalizeSquadKey(newKeyInput);
 
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     const existingOldKey = findSquadKeyCaseInsensitive(raw, oldKeyNormalized);
     if (!existingOldKey) {
       throw new SquadCommandError(`El squad "${oldKeyNormalized}" no existe.`);
@@ -265,11 +220,11 @@ export async function renameSquad(filePath, squadKeyInput, newKeyInput) {
   });
 }
 
-export async function movePlayer(filePath, playerNameInput, targetSquadKeyInput) {
+export async function movePlayer(guildId, playerNameInput, targetSquadKeyInput) {
   const nameLower = String(playerNameInput).trim().toLowerCase();
   const targetKey = normalizeSquadKey(targetSquadKeyInput);
 
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     const existingTargetKey = findSquadKeyCaseInsensitive(raw, targetKey);
     if (!existingTargetKey) {
       throw new SquadCommandError(`El squad "${targetKey}" no existe.`);
@@ -293,14 +248,14 @@ export async function movePlayer(filePath, playerNameInput, targetSquadKeyInput)
   });
 }
 
-export async function addGuild(filePath, guildNameInput) {
+export async function addGuild(guildId, guildNameInput) {
   const name = String(guildNameInput).trim();
   if (name.length === 0) {
     throw new SquadCommandError('El nombre del gremio no puede estar vacío.');
   }
   const nameLower = name.toLowerCase();
 
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     if (raw.guilds.some((g) => g.toLowerCase() === nameLower)) {
       throw new SquadCommandError(`"${name}" ya está en la lista de gremios.`);
     }
@@ -308,10 +263,10 @@ export async function addGuild(filePath, guildNameInput) {
   });
 }
 
-export async function removeGuild(filePath, guildNameInput) {
+export async function removeGuild(guildId, guildNameInput) {
   const nameLower = String(guildNameInput).trim().toLowerCase();
 
-  return mutateSquadsConfig(filePath, (raw) => {
+  return mutateSquadsConfig(guildId, (raw) => {
     const index = raw.guilds.findIndex((g) => g.toLowerCase() === nameLower);
     if (index === -1) {
       throw new SquadCommandError(`"${guildNameInput}" no está en la lista de gremios.`);

@@ -8,9 +8,9 @@ const ROLLS_FIELD_MAX = 1020;
  * Contenido (texto plano, no embed) del anuncio inicial del sorteo.
  *
  * `requiredRoleId` (el rol del parámetro opcional de /sorteo) y `roleId` (el
- * RAFFLE_ROLE_ID de entorno, que solo pinga sin restringir) son mutuamente
+ * raffleRoleId de la config del servidor, que solo pinga sin restringir) son mutuamente
  * excluyentes: si hay rol restrictivo, ese es el público del sorteo y es el
- * único que se menciona — pingear también RAFFLE_ROLE_ID sería ruido.
+ * único que se menciona — pingear también raffleRoleId sería ruido.
  * @param {{ creatorId: string, endsAtUnixSeconds: number, roleId?: string | null, requiredRoleId?: string | null }} params
  */
 export function buildRaffleAnnouncementContent({ creatorId, endsAtUnixSeconds, roleId, requiredRoleId }) {

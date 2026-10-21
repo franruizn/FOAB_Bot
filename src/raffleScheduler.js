@@ -1,15 +1,34 @@
 import crypto from 'node:crypto';
-import { RAFFLES_PATH } from './dataPaths.js';
+import { listarGuilds } from './services/guildStore.js';
 import { loadRaffles, removeRaffle } from './services/rafflesStore.js';
 import { buildRaffleResultsEmbed, buildNoParticipantsEmbed } from './ui/raffleEmbed.js';
 
 const RAFFLE_EMOJI = '🎉';
 const REACTORS_PAGE_LIMIT = 100;
 
-// raffleId -> Timeout. Solo vive en memoria: si el proceso se reinicia, se
-// reconstruye desde raffles.json en initializeRaffles(). No hace falta
-// cancelarlos en el shutdown: el estado real vive en el fichero, no aquí.
+// guildId -> (raffleId -> Timeout). Indexado por servidor: cada uno tiene su
+// propio raffles.json y sus timers no se mezclan con los de otro. Solo vive
+// en memoria: si el proceso se reinicia, se reconstruye desde los
+// raffles.json en initializeRaffles(). No hace falta cancelarlos en el
+// shutdown: el estado real vive en los ficheros, no aquí.
+/** @type {Map<string, Map<string, NodeJS.Timeout>>} */
 const activeTimers = new Map();
+
+function clearActiveTimer(guildId, raffleId) {
+  const timers = activeTimers.get(guildId);
+  if (!timers) return;
+  timers.delete(raffleId);
+  if (timers.size === 0) activeTimers.delete(guildId);
+}
+
+function setActiveTimer(guildId, raffleId, timer) {
+  let timers = activeTimers.get(guildId);
+  if (!timers) {
+    timers = new Map();
+    activeTimers.set(guildId, timers);
+  }
+  timers.set(raffleId, timer);
+}
 
 /**
  * Trae TODOS los usuarios que reaccionaron con 🎉, paginando de a 100 (el
@@ -112,14 +131,14 @@ function applyTiebreak(results) {
  * @param {{ delayed?: boolean }} [options]
  */
 export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
-  activeTimers.delete(raffle.id);
+  clearActiveTimer(raffle.guildId, raffle.id);
 
   let channel;
   try {
     channel = await client.channels.fetch(raffle.channelId);
   } catch (error) {
     console.error(`[raffle] No se pudo obtener el canal ${raffle.channelId} del sorteo ${raffle.id}:`, error?.stack ?? error);
-    await removeRaffle(RAFFLES_PATH, raffle.id);
+    await removeRaffle(raffle.guildId, raffle.id);
     return;
   }
 
@@ -131,7 +150,7 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
     await channel.send('⚠️ No se pudo resolver un sorteo: el mensaje original fue borrado.').catch((sendError) => {
       console.error('[raffle] Tampoco se pudo avisar en el canal:', sendError?.stack ?? sendError);
     });
-    await removeRaffle(RAFFLES_PATH, raffle.id);
+    await removeRaffle(raffle.guildId, raffle.id);
     return;
   }
 
@@ -153,7 +172,7 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
       embeds: [buildNoParticipantsEmbed({ delayed, totalReactors: reactors.length, roleMissing })],
       reply,
     });
-    await removeRaffle(RAFFLES_PATH, raffle.id);
+    await removeRaffle(raffle.guildId, raffle.id);
     return;
   }
 
@@ -162,7 +181,7 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
   const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak, totalReactors: reactors.length });
   await channel.send({ content: `<@${winner.user.id}> ha ganado el sorteo de <@${raffle.creatorId}>`, embeds: [embed], reply });
 
-  await removeRaffle(RAFFLES_PATH, raffle.id);
+  await removeRaffle(raffle.guildId, raffle.id);
 
 }
 
@@ -178,7 +197,7 @@ export function scheduleRaffleResolution(client, raffle) {
       console.error(`[raffle] Error resolviendo el sorteo ${raffle.id}:`, error?.stack ?? error);
     });
   }, delayMs);
-  activeTimers.set(raffle.id, timer);
+  setActiveTimer(raffle.guildId, raffle.id, timer);
 }
 
 /**
@@ -188,11 +207,26 @@ export function scheduleRaffleResolution(client, raffle) {
  * @param {import('discord.js').Client} client
  */
 export async function initializeRaffles(client) {
-  const raffles = await loadRaffles(RAFFLES_PATH);
-  if (raffles.length === 0) return;
+  for (const guildId of await listarGuilds()) {
+    try {
+      await initializeGuildRaffles(client, guildId);
+    } catch (error) {
+      // Un raffles.json roto en un servidor no impide reanudar los demás.
+      console.error(`[raffle] Error reanudando los sorteos del servidor ${guildId}:`, error?.stack ?? error);
+    }
+  }
+}
+
+async function initializeGuildRaffles(client, guildId) {
+  const stored = await loadRaffles(guildId);
+  if (stored.length === 0) return;
 
   const now = Date.now();
-  console.log(`[raffle] Reanudando ${raffles.length} sorteo(s) activo(s) desde ${RAFFLES_PATH}.`);
+  console.log(`[raffle] Reanudando ${stored.length} sorteo(s) activo(s) del servidor ${guildId}.`);
+
+  // El servidor dueño es el de la carpeta, no lo que diga el JSON: así un
+  // sorteo nunca se resuelve ni se borra contra el fichero de otro servidor.
+  const raffles = stored.map((raffle) => ({ ...raffle, guildId }));
 
   for (const raffle of raffles) {
     if (raffle.endsAt <= now) {
@@ -229,12 +263,12 @@ export async function handleRaffleReactionAdd(reaction, user) {
 
   if (reaction.emoji.name !== RAFFLE_EMOJI) return;
 
-  const raffles = await loadRaffles(RAFFLES_PATH);
-  const raffle = raffles.find((r) => r.messageId === reaction.message.id);
-  if (!raffle?.roleId) return;
-
   const guild = reaction.message.guild;
   if (!guild) return;
+
+  const raffles = await loadRaffles(guild.id);
+  const raffle = raffles.find((r) => r.messageId === reaction.message.id);
+  if (!raffle?.roleId) return;
 
   const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
   const channel = reaction.message.channel;

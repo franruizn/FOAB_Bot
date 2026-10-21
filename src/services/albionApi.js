@@ -50,6 +50,9 @@ function createCache() {
   };
 }
 
+// Compartidas entre servidores de Discord A PROPÓSITO: la clave es
+// servidor de Albion + battleId, y una batalla es la misma la pida quien la
+// pida. Nada de aquí depende del servidor de Discord que pregunta.
 const battleCache = createCache();
 const eventsCache = createCache();
 

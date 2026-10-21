@@ -10,7 +10,7 @@ import { isOfficer } from './permissions.js';
  * (entrada de usuario o fallos esperados de la API) se loguean en una línea;
  * cualquier error no reconocido se loguea con el stack completo, ya que ahí
  * sí puede tratarse de un bug real. `known: false` marca justo ese último
- * caso, para que el llamador decida si avisa por LOG_CHANNEL_ID.
+ * caso, para que el llamador decida si avisa en el canal de logs del servidor.
  * @returns {{ embed: import('discord.js').EmbedBuilder, officerOnly: boolean, known: boolean }}
  */
 function classifyError(error) {
@@ -95,7 +95,7 @@ export async function handleInteractionError(interaction, error) {
   const { embed, officerOnly, known } = classifyError(error);
 
   const visibleEmbed =
-    officerOnly && !isOfficer(interaction)
+    officerOnly && !(await isOfficer(interaction).catch(() => false))
       ? errorEmbed('Ha ocurrido un error', 'Ha ocurrido un error de configuración. Contacta a un oficial.')
       : embed;
 

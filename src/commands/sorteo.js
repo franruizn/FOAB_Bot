@@ -2,7 +2,7 @@ import { SlashCommandBuilder } from 'discord.js';
 import { isOfficer } from '../permissions.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
 import { buildRaffleAnnouncementContent } from '../ui/raffleEmbed.js';
-import { RAFFLES_PATH } from '../dataPaths.js';
+import { getConfig } from '../services/guildStore.js';
 import { loadRaffles, addRaffle } from '../services/rafflesStore.js';
 import { scheduleRaffleResolution } from '../raffleScheduler.js';
 
@@ -10,7 +10,7 @@ const MIN_MINUTES = 1;
 const MAX_MINUTES = 1440;
 
 // Visible para todos en el picker de Discord a propósito: el filtro real es
-// isOfficer() (OFFICER_ROLE_ID) en runtime, no un permiso de Discord por
+// isOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder()
   .setName('sorteo')
@@ -34,7 +34,7 @@ export const data = new SlashCommandBuilder()
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 export async function execute(interaction) {
-  if (!isOfficer(interaction)) {
+  if (!(await isOfficer(interaction))) {
     await interaction.reply({
       embeds: [errorEmbed('Sin permiso', 'Este comando es solo para el rol de oficiales.')],
       ephemeral: true,
@@ -65,7 +65,7 @@ export async function execute(interaction) {
     return;
   }
 
-  const existingRaffles = await loadRaffles(RAFFLES_PATH);
+  const existingRaffles = await loadRaffles(interaction.guildId);
   if (existingRaffles.some((raffle) => raffle.channelId === interaction.channelId)) {
     await interaction.reply({
       embeds: [errorEmbed('Ya hay un sorteo activo', 'Solo puede haber un sorteo activo por canal. Espera a que termine.')],
@@ -78,17 +78,18 @@ export async function execute(interaction) {
 
   const endsAt = Date.now() + minutes * 60_000;
   const requiredRoleId = requiredRole?.id ?? null;
+  const { raffleRoleId } = await getConfig(interaction.guildId);
   const content = buildRaffleAnnouncementContent({
     creatorId: interaction.user.id,
     endsAtUnixSeconds: Math.floor(endsAt / 1000),
-    roleId: process.env.RAFFLE_ROLE_ID || null,
+    roleId: raffleRoleId,
     requiredRoleId,
   });
 
   // Sin allowedMentions explícito, discord.js renderiza la mención de rol
   // pero no siempre la notifica; con rol restrictivo esa mención es la única
   // pista visible de a quién va dirigido el sorteo, así que se fuerza aquí.
-  const pingRoleId = requiredRoleId ?? (process.env.RAFFLE_ROLE_ID || null);
+  const pingRoleId = requiredRoleId ?? raffleRoleId;
   const message = await interaction.channel.send({
     content,
     allowedMentions: { roles: pingRoleId ? [pingRoleId] : [] },
@@ -105,7 +106,7 @@ export async function execute(interaction) {
     roleId: requiredRoleId,
   };
 
-  await addRaffle(RAFFLES_PATH, raffle);
+  await addRaffle(raffle);
   // creatorId va dentro de `raffle` (persistido arriba) — no se pasa aparte:
   // ver el comentario en resolveRaffle() sobre por qué.
   scheduleRaffleResolution(interaction.client, raffle);

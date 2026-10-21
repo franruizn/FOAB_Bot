@@ -2,38 +2,53 @@ import { readFile, writeFile, rename, mkdir, readdir, unlink, copyFile, access }
 import path from 'node:path';
 
 // Piezas compartidas por los stores JSON con mutex + escritura atómica +
-// backups (squadsStore.js fue el primero en implementar este patrón; este
-// módulo evita que el resto de stores, como massDm.js, lo dupliquen byte a byte).
+// backups: squadsStore.js, rafflesStore.js, guildStore.js y massDm.js.
 //
-// Cada módulo que use esto sigue teniendo SU PROPIO mutex (createMutex() no
-// es un singleton): un fichero JSON = un candado, igual que
-// squadsStore.js/rafflesStore.js, que ya son independientes entre sí.
+// Un fichero JSON = un candado, indexado por su ruta absoluta. Con varios
+// servidores, un candado por store serializaría la escritura del servidor A
+// con la del B sin motivo; uno por fichero solo serializa lo que de verdad
+// compite por el mismo fichero.
 
 const BACKUP_DIR_NAME = 'backups';
 const MAX_BACKUPS = 10;
 
+/** @type {Map<string, Promise<void>>} ruta absoluta -> cola de ese fichero */
+const fileTails = new Map();
+
 /**
- * Cadena de mutex por módulo: serializa toda la secuencia
- * leer-modificar-escribir de un fichero, no solo la escritura final.
- * @returns {{ withWriteLock: (task: () => Promise<any>) => Promise<any>, waitForPendingWrites: () => Promise<void> }}
+ * Serializa toda la secuencia leer-modificar-escribir de `filePath`, no solo
+ * la escritura final. Dos ficheros distintos nunca se esperan entre sí.
+ * @template T
+ * @param {string} filePath
+ * @param {() => Promise<T>} task
+ * @returns {Promise<T>}
  */
-export function createMutex() {
-  let writeTail = Promise.resolve();
+export function withFileLock(filePath, task) {
+  const key = path.resolve(filePath);
+  const previous = fileTails.get(key) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  fileTails.set(key, tail);
+  // Sin esto el Map crecería con cada fichero tocado alguna vez: se borra la
+  // entrada en cuanto su cola se vacía (si nadie encoló detrás mientras tanto).
+  tail.then(() => {
+    if (fileTails.get(key) === tail) fileTails.delete(key);
+  });
+  return run;
+}
 
-  function withWriteLock(task) {
-    const run = writeTail.then(task, task);
-    writeTail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
-  }
-
-  function waitForPendingWrites() {
-    return writeTail;
-  }
-
-  return { withWriteLock, waitForPendingWrites };
+/**
+ * Se resuelve cuando terminan todas las escrituras encoladas en este momento,
+ * de cualquier fichero. Pensado para el shutdown por SIGTERM: esperar esto
+ * antes de salir evita cortar un fs.rename() a mitad. No espera escrituras
+ * que se encolen DESPUÉS de llamarlo.
+ * @returns {Promise<void>}
+ */
+export async function waitForAllFileWrites() {
+  await Promise.all([...fileTails.values()]);
 }
 
 /**
@@ -54,7 +69,7 @@ export async function readJsonFile(filePath, defaultValue) {
 }
 
 /**
- * Copia el fichero actual a DATA_DIR/backups/<prefix>-<timestamp>.json antes
+ * Copia el fichero actual a <su carpeta>/backups/<prefix>-<timestamp>.json antes
  * de sobrescribirlo, y conserva solo las últimas MAX_BACKUPS copias con ese
  * prefijo (no toca backups de otros stores que compartan el directorio). No
  * hace nada si el fichero todavía no existe (nada que respaldar).

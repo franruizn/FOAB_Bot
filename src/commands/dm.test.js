@@ -5,18 +5,19 @@ import path from 'node:path';
 import os from 'node:os';
 
 // DM_STATE_PATH se calcula al importar dataPaths.js: DATA_DIR tiene que
-// estar fijado antes. DM_OWNER_ID / LOG_CHANNEL_ID se leen en cada llamada.
+// estar fijado antes. DM_OWNER_ID se lee en cada llamada; el canal de logs y
+// el rol de exclusión, del config.json del servidor.
 const DIR = await mkdtemp(path.join(os.tmpdir(), 'dm-cmd-test-'));
 process.env.DATA_DIR = DIR;
-process.env.LOG_CHANNEL_ID = 'log-chan';
 
 const { DM_STATE_PATH } = await import('../dataPaths.js');
+const { setConfig } = await import('../services/guildStore.js');
 const { execute, __setDmSleepForTests } = await import('./dm.js');
 
 __setDmSleepForTests(async () => {});
 
 const OWNER = 'owner-1';
-const GUILD_ID = 'guild-1';
+const GUILD_ID = '100000000000000001';
 
 after(async () => {
   await rm(DIR, { recursive: true, force: true });
@@ -24,7 +25,7 @@ after(async () => {
 
 beforeEach(async () => {
   process.env.DM_OWNER_ID = OWNER;
-  delete process.env.DM_OPTOUT_ROLE_ID;
+  await setConfig(GUILD_ID, { logChannelId: 'log-chan', dmOptoutRoleId: null });
   await rm(DM_STATE_PATH, { force: true });
 });
 
@@ -46,6 +47,7 @@ function makeClient() {
   return {
     channels: {
       fetch: async () => ({
+        guildId: GUILD_ID,
         isTextBased: () => true,
         send: async (payload) => {
           logSends.push(payload);
@@ -93,6 +95,7 @@ function makeInteraction({ userId = OWNER, rol = null, lista = null, members = n
 
   const interaction = {
     id,
+    guildId: GUILD_ID,
     client,
     user: { id: userId, tag: `${userId}#0001`, username: userId },
     member: { displayName: 'Remitente' },
@@ -221,7 +224,7 @@ test('/dm: lista con <@id> y @nombre mezclados resuelve ambos; bots saltados; ll
 });
 
 test('/dm: con rol, un destinatario con DMs cerrados y otro con el rol de exclusión se reportan', async () => {
-  process.env.DM_OPTOUT_ROLE_ID = 'optout';
+  await setConfig(GUILD_ID, { dmOptoutRoleId: 'optout' });
   const cerrado = makeMember('2', 'dos', { roles: ['grupo'] });
   cerrado.send = async () => {
     throw Object.assign(new Error('Cannot send messages to this user'), { code: 50007 });

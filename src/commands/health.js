@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../services/config.js';
 import { SERVER_HOSTS } from '../services/albionApi.js';
-import { SQUADS_CONFIG_PATH, DATA_DIR } from '../dataPaths.js';
+import { getConfig, rutaDe } from '../services/guildStore.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
 import { isOfficer } from '../permissions.js';
 
@@ -13,7 +13,7 @@ const EMBED_COLOR = 0x00ff9d;
 const PING_TIMEOUT_MS = 5_000;
 
 // Visible para todos en el picker de Discord a propósito: el filtro real es
-// isOfficer() (OFFICER_ROLE_ID) en runtime, no un permiso de Discord por
+// isOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder().setName('health').setDescription('Estado del bot (solo oficiales)');
 
@@ -39,8 +39,8 @@ async function readVersion() {
   }
 }
 
-async function findLastBackup() {
-  const backupDir = path.join(DATA_DIR, 'backups');
+async function findLastBackup(guildId) {
+  const backupDir = rutaDe(guildId, 'backups');
   try {
     const entries = (await readdir(backupDir)).filter((name) => name.startsWith('squads-') && name.endsWith('.json'));
     if (entries.length === 0) return null;
@@ -49,7 +49,7 @@ async function findLastBackup() {
     const stats = await stat(path.join(backupDir, latest));
     return stats.mtime;
   } catch {
-    return null; // aún no hay backups (nunca se usó /squads en este DATA_DIR)
+    return null; // aún no hay backups (nunca se usó /squads en este servidor)
   }
 }
 
@@ -76,7 +76,7 @@ async function pingAlbionApi(server) {
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 export async function execute(interaction) {
-  if (!isOfficer(interaction)) {
+  if (!(await isOfficer(interaction))) {
     await interaction.reply({
       embeds: [errorEmbed('Sin permiso', 'Este comando es solo para el rol de oficiales.')],
       ephemeral: true,
@@ -86,13 +86,13 @@ export async function execute(interaction) {
 
   await interaction.deferReply({ ephemeral: true });
 
-  const server = process.env.ALBION_SERVER || 'europe';
+  const { albionServer: server } = await getConfig(interaction.guildId);
 
   const [version, lastBackup, latencyMs, configResult] = await Promise.all([
     readVersion(),
-    findLastBackup(),
+    findLastBackup(interaction.guildId),
     pingAlbionApi(server),
-    loadConfig(SQUADS_CONFIG_PATH).catch((error) => ({ error })),
+    loadConfig(interaction.guildId).catch((error) => ({ error })),
   ]);
 
   const squadsLine =

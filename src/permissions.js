@@ -1,12 +1,17 @@
+import { getConfig } from './services/guildStore.js';
+
 /**
  * Comprueba en runtime si quien invocó la interacción tiene el rol de
- * oficiales (OFFICER_ROLE_ID). No confiar solo en setDefaultMemberPermissions:
- * eso es una guía de UI en Discord, no una restricción real.
+ * oficiales de ESE servidor (officerRoleId de su config.json). No confiar
+ * solo en setDefaultMemberPermissions: eso es una guía de UI en Discord, no
+ * una restricción real. Falla cerrado: sin servidor (un DM) o sin rol
+ * configurado, nadie es oficial.
  * @param {import('discord.js').Interaction} interaction
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-export function isOfficer(interaction) {
-  const officerRoleId = process.env.OFFICER_ROLE_ID;
+export async function isOfficer(interaction) {
+  if (!interaction.guildId) return false;
+  const { officerRoleId } = await getConfig(interaction.guildId);
   if (!officerRoleId) return false;
   return interaction.member?.roles?.cache?.has(officerRoleId) ?? false;
 }

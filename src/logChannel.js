@@ -1,16 +1,29 @@
 import { EmbedBuilder, AttachmentBuilder } from 'discord.js';
+import { getConfig } from './services/guildStore.js';
 
 const MUTATION_COLOR = 0x5865f2;
 const ERROR_COLOR = 0xed4245;
 
-async function sendToLogChannel(client, embed, files = []) {
-  const channelId = process.env.LOG_CHANNEL_ID;
-  if (!channelId) return; // opcional: sin configurar, no hace nada
+/**
+ * Envía al canal de logs del servidor `guildId` (logChannelId de su
+ * config.json). Sin servidor (un DM) o sin canal configurado, no hace nada.
+ */
+async function sendToLogChannel(client, guildId, embed, files = []) {
+  if (!guildId) return;
 
   try {
+    const { logChannelId: channelId } = await getConfig(guildId);
+    if (!channelId) return; // opcional: sin configurar, no hace nada
+
     const channel = await client.channels.fetch(channelId);
     if (!channel?.isTextBased()) {
-      console.error(`[logChannel] LOG_CHANNEL_ID (${channelId}) no resuelve a un canal de texto.`);
+      console.error(`[logChannel] logChannelId (${channelId}) del servidor ${guildId} no resuelve a un canal de texto.`);
+      return;
+    }
+    // Un id copiado de otro servidor mandaría los logs de este (textos de
+    // /dm incluidos) a gente que no debe verlos: se exige que sea suyo.
+    if (channel.guildId !== guildId) {
+      console.error(`[logChannel] logChannelId (${channelId}) no pertenece al servidor ${guildId}: no se envía.`);
       return;
     }
     await channel.send({ embeds: [embed], files });
@@ -21,12 +34,12 @@ async function sendToLogChannel(client, embed, files = []) {
 }
 
 /**
- * Notifica en LOG_CHANNEL_ID (si está configurado) que /squads modificó
+ * Notifica en el canal de logs del servidor (si está configurado) que /squads modificó
  * squads.json: quién, qué subcomando, y un resumen de qué cambió.
  * @param {import('discord.js').Client} client
- * @param {{ actorTag: string, subcommand: string, summary: string }} params
+ * @param {{ guildId: string | null, actorTag: string, subcommand: string, summary: string }} params
  */
-export async function notifySquadMutation(client, { actorTag, subcommand, summary }) {
+export async function notifySquadMutation(client, { guildId, actorTag, subcommand, summary }) {
   const embed = new EmbedBuilder()
     .setColor(MUTATION_COLOR)
     .setTitle('📝 /squads modificó squads.json')
@@ -37,18 +50,18 @@ export async function notifySquadMutation(client, { actorTag, subcommand, summar
     )
     .setTimestamp(new Date());
 
-  await sendToLogChannel(client, embed);
+  await sendToLogChannel(client, guildId, embed);
 }
 
 /**
- * Notifica en LOG_CHANNEL_ID (si está configurado) que /crear-rol creó un
+ * Notifica en el canal de logs del servidor (si está configurado) que /crear-rol creó un
  * rol nuevo y a quiénes se lo asignó (o falló al asignar).
  * @param {import('discord.js').Client} client
- * @param {{ actorTag: string, roleMention: string, assignedCount: number, totalResolved: number, unresolved: string[], failedMentions: string[] }} params
+ * @param {{ guildId: string | null, actorTag: string, roleMention: string, assignedCount: number, totalResolved: number, unresolved: string[], failedMentions: string[] }} params
  */
 export async function notifyRoleCreation(
   client,
-  { actorTag, roleMention, assignedCount, totalResolved, unresolved, failedMentions },
+  { guildId, actorTag, roleMention, assignedCount, totalResolved, unresolved, failedMentions },
 ) {
   const lines = [`Asignado a **${assignedCount}** de ${totalResolved} persona(s) resuelta(s).`];
   if (unresolved.length > 0) {
@@ -68,17 +81,17 @@ export async function notifyRoleCreation(
     )
     .setTimestamp(new Date());
 
-  await sendToLogChannel(client, embed);
+  await sendToLogChannel(client, guildId, embed);
 }
 
 /**
- * Notifica en LOG_CHANNEL_ID (si está configurado) que un comando falló con
+ * Notifica en el canal de logs del servidor (si está configurado) que un comando falló con
  * un error no controlado (no un InvalidLinkError/AlbionApiError/etc. con
  * mensaje propio, sino algo inesperado que merece revisión).
  * @param {import('discord.js').Client} client
- * @param {{ commandName: string, actorTag: string, error: unknown }} params
+ * @param {{ guildId: string | null, commandName: string, actorTag: string, error: unknown }} params
  */
-export async function notifyUncontrolledError(client, { commandName, actorTag, error }) {
+export async function notifyUncontrolledError(client, { guildId, commandName, actorTag, error }) {
   const message = error instanceof Error ? error.message : String(error);
   const embed = new EmbedBuilder()
     .setColor(ERROR_COLOR)
@@ -90,7 +103,7 @@ export async function notifyUncontrolledError(client, { commandName, actorTag, e
     )
     .setTimestamp(new Date());
 
-  await sendToLogChannel(client, embed);
+  await sendToLogChannel(client, guildId, embed);
 }
 
 // Por encima de esto el texto de un /dm no cabe en la descripción de un
@@ -98,12 +111,12 @@ export async function notifyUncontrolledError(client, { commandName, actorTag, e
 const DM_LOG_TEXT_MAX_LENGTH = 4000;
 
 /**
- * Notifica en LOG_CHANNEL_ID (si está configurado) que alguien que NO es
+ * Notifica en el canal de logs del servidor (si está configurado) que alguien que NO es
  * DM_OWNER_ID intentó usar /dm.
  * @param {import('discord.js').Client} client
- * @param {{ actorTag: string, actorId: string }} params
+ * @param {{ guildId: string | null, actorTag: string, actorId: string }} params
  */
-export async function notifyDmUnauthorized(client, { actorTag, actorId }) {
+export async function notifyDmUnauthorized(client, { guildId, actorTag, actorId }) {
   const embed = new EmbedBuilder()
     .setColor(ERROR_COLOR)
     .setTitle('🚫 Intento de /dm sin permiso')
@@ -114,7 +127,7 @@ export async function notifyDmUnauthorized(client, { actorTag, actorId }) {
     )
     .setTimestamp(new Date());
 
-  await sendToLogChannel(client, embed);
+  await sendToLogChannel(client, guildId, embed);
 }
 
 /**
@@ -122,9 +135,9 @@ export async function notifyDmUnauthorized(client, { actorTag, actorId }) {
  * bot se caiga a mitad): quién, a cuántos, el texto completo tal y como lo
  * reciben y la hora (el timestamp del embed).
  * @param {import('discord.js').Client} client
- * @param {{ actorTag: string, actorId: string, total: number, content: string }} params
+ * @param {{ guildId: string | null, actorTag: string, actorId: string, total: number, content: string }} params
  */
-export async function notifyDmStarted(client, { actorTag, actorId, total, content }) {
+export async function notifyDmStarted(client, { guildId, actorTag, actorId, total, content }) {
   const fitsInEmbed = content.length <= DM_LOG_TEXT_MAX_LENGTH;
   const embed = new EmbedBuilder()
     .setColor(MUTATION_COLOR)
@@ -139,15 +152,15 @@ export async function notifyDmStarted(client, { actorTag, actorId, total, conten
   const files = fitsInEmbed
     ? []
     : [new AttachmentBuilder(Buffer.from(content, 'utf8'), { name: `dm-${Date.now()}.txt` })];
-  await sendToLogChannel(client, embed, files);
+  await sendToLogChannel(client, guildId, embed, files);
 }
 
 /**
  * Resultado de un /dm ya terminado (el texto ya quedó en notifyDmStarted).
  * @param {import('discord.js').Client} client
- * @param {{ actorTag: string, summary: string }} params
+ * @param {{ guildId: string | null, actorTag: string, summary: string }} params
  */
-export async function notifyDmFinished(client, { actorTag, summary }) {
+export async function notifyDmFinished(client, { guildId, actorTag, summary }) {
   const embed = new EmbedBuilder()
     .setColor(MUTATION_COLOR)
     .setTitle('📨 /dm: envío terminado')
@@ -155,7 +168,7 @@ export async function notifyDmFinished(client, { actorTag, summary }) {
     .addFields({ name: 'Remitente', value: actorTag, inline: true })
     .setTimestamp(new Date());
 
-  await sendToLogChannel(client, embed);
+  await sendToLogChannel(client, guildId, embed);
 }
 
 /**
@@ -163,9 +176,9 @@ export async function notifyDmFinished(client, { actorTag, summary }) {
  * envío). NO se reanuda — reenviar a quien ya lo recibió es peor que no
  * enviar —, solo se deja constancia de cuántos salieron para decidir a mano.
  * @param {import('discord.js').Client} client
- * @param {{ actorTag: string, startedAt: number, total: number, sentIds: string[] }} params
+ * @param {{ guildId: string | null, actorTag: string, startedAt: number, total: number, sentIds: string[] }} params
  */
-export async function notifyDmInterrupted(client, { actorTag, startedAt, total, sentIds }) {
+export async function notifyDmInterrupted(client, { guildId, actorTag, startedAt, total, sentIds }) {
   const embed = new EmbedBuilder()
     .setColor(ERROR_COLOR)
     .setTitle('⚠️ /dm interrumpido por un reinicio')
@@ -180,5 +193,5 @@ export async function notifyDmInterrupted(client, { actorTag, startedAt, total, 
     sentIds.length > 0
       ? [new AttachmentBuilder(Buffer.from(sentIds.join('\n'), 'utf8'), { name: `dm-enviados-${startedAt}.txt` })]
       : [];
-  await sendToLogChannel(client, embed, files);
+  await sendToLogChannel(client, guildId, embed, files);
 }
