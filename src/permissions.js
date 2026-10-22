@@ -62,3 +62,26 @@ export function isAdministrator(interaction) {
   if (!interaction.guildId) return false;
   return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
 }
+
+/**
+ * Todo es por servidor (config, squads, sorteos): una interacción que llega
+ * por mensaje directo no tiene guildId del que sacar nada, y sin esto
+ * acabaría en rutaDe(null) y un "error inesperado". La responde (o vacía el
+ * autocompletado) y devuelve true; dentro de un servidor no hace nada.
+ * @param {import('discord.js').Interaction} interaction
+ * @returns {Promise<boolean>} true si la interacción ya se ha rechazado
+ */
+export async function rejectOutsideGuild(interaction) {
+  if (interaction.inGuild()) return false;
+  if (interaction.isAutocomplete()) {
+    await interaction.respond([]).catch(() => {});
+  } else if (interaction.isRepliable()) {
+    await interaction
+      .reply({
+        embeds: [errorEmbed('Solo en servidores', 'Este comando solo funciona dentro de un servidor, no por mensaje directo.')],
+        ephemeral: true,
+      })
+      .catch(() => {});
+  }
+  return true;
+}

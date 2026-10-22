@@ -87,6 +87,26 @@ Si falta `GUILD_ID`, el bot **no arranca** y no mueve nada (mover los datos al
 servidor equivocado es peor que no arrancar). Si `guilds/` ya existe, no hace
 nada.
 
+## Entrar y salir de servidores
+
+- **Al añadir el bot a un servidor** se crea su carpeta con un `config.json`
+  por defecto y se publica una bienvenida de tres líneas (en el canal de
+  sistema, o en el primero donde pueda escribir) pidiendo a un administrador
+  que ejecute `/config ver`. Empieza **sin squads**: el semilla
+  (`src/config/squads.seed.json`) es solo para `npm run smoke` y nunca se copia
+  a un servidor.
+- **Al echarlo, no se borra nada**: su `config.json` pasa a `"activo": false`
+  con la fecha en `"inactivoDesde"`. Si lo vuelven a añadir, recupera su
+  configuración y sus squads tal cual.
+- Al arrancar se reconcilia contra la lista real de servidores, porque las
+  entradas y salidas con el bot apagado no generan eventos.
+- **`ALLOWED_GUILD_IDS`** (opcional, ids separados por comas): si está
+  definida, el bot sale de cualquier servidor fuera de la lista (al entrar y al
+  arrancar) y lo deja en el log, sin crearle carpeta. Vacía, acepta cualquiera.
+
+`/health` muestra en cuántos servidores está el bot y cuántos tienen la
+configuración completa.
+
 ## Squads de jugadores y de gremio
 
 `squads.json` tiene dos tipos de squad, y `isGuild` es obligatorio en todos:
@@ -137,18 +157,33 @@ El registro de comandos es un paso **aparte** de arrancar el bot — hay que
 correrlo cada vez que cambian los comandos (nombre, opciones, subcomandos),
 no en cada arranque.
 
-| Script | Cuándo usarlo | Alcance | Propagación |
-|---|---|---|---|
-| `npm run deploy:dev` | Mientras desarrollas | Un solo servidor (`GUILD_ID` en `.env`) | Instantánea |
-| `npm run deploy:prod` | Al publicar una versión estable | Todos los servidores donde esté el bot | Hasta 1 hora |
-| `npm run deploy:clean` | Al pasar de dev a prod (o viceversa) | Borra los comandos de guild de `GUILD_ID` | Instantánea |
+**`npm run deploy:prod` (global) es el modo normal**: un solo registro vale
+para todos los servidores donde esté el bot, también los que lo añadan
+después.
 
-**Por qué existe `deploy:clean`:** si registras los comandos en modo `guild`
-(dev) y luego también en modo `global` (prod) sin limpiar, Discord muestra
-**cada comando duplicado** en ese servidor (uno de guild, otro global). Antes
-de pasar a producción en un servidor que usaste para desarrollo, corre
-`npm run deploy:clean` para borrar los comandos de guild y quedarte solo con
-los globales.
+| Script | Cuándo usarlo | Qué registra | Propagación |
+|---|---|---|---|
+| `npm run deploy:prod` | Siempre (producción) | Todos los comandos menos `/dm`, globales; `/dm` solo en `DM_GUILD_ID` | **Hasta 1 hora** |
+| `npm run deploy:dev` | Mientras desarrollas | Todos, `/dm` incluido, en `GUILD_ID` | Instantánea |
+| `npm run deploy:clean` | Antes del primer `deploy:prod`, y al dejar de desarrollar | Borra los comandos de guild de `GUILD_ID` | Instantánea |
+
+- **La propagación global tarda hasta una hora.** Tras un `deploy:prod`, un
+  comando nuevo o cambiado puede no verse todavía en algunos servidores (o
+  verse con las opciones viejas). No es un fallo: espera antes de tocar nada.
+- **Antes del primer `deploy:prod`, corre `npm run deploy:clean`** sobre el
+  servidor de desarrollo. Si no, ahí cada comando sale **duplicado** (el de
+  guild de `deploy:dev` y el global). Lo mismo cada vez que vuelvas de
+  `deploy:dev` a producción.
+- **`/dm` no es global.** Global, saldría en la lista de todos los servidores
+  y cualquiera que lo probara recibiría un rechazo: ruido, y además enseña que
+  existe. Se registra como comando de guild solo en `DM_GUILD_ID` (el servidor
+  donde está `DM_OWNER_ID`). Quién puede usarlo sigue siendo solo
+  `DM_OWNER_ID`, global al bot: `/config` no lo toca y ningún administrador
+  puede concederlo. Si `DM_GUILD_ID` falta, `deploy:prod` avisa y no registra
+  `/dm` en ninguna parte. Si `GUILD_ID` y `DM_GUILD_ID` son el mismo
+  servidor, `deploy:clean` conserva `/dm`.
+- Los comandos globales solo se ofrecen dentro de servidores, no por mensaje
+  directo (y el bot rechaza cualquiera que llegue por DM).
 
 El modo también se puede fijar con la variable de entorno `DEPLOY_SCOPE`
 (`guild` | `global` | `clean`, por defecto `guild`) en vez del argumento CLI —

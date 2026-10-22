@@ -6,6 +6,7 @@ import { loadConfig } from '../services/config.js';
 import { SERVER_HOSTS } from '../services/albionApi.js';
 import { getConfig, rutaDe } from '../services/guildStore.js';
 import { ensureOfficer } from '../permissions.js';
+import { isConfigComplete } from '../services/configFields.js';
 
 const PACKAGE_JSON_PATH = fileURLToPath(new URL('../../package.json', import.meta.url));
 const EMBED_COLOR = 0x00ff9d;
@@ -72,6 +73,18 @@ async function pingAlbionApi(server) {
 }
 
 /**
+ * En cuántos servidores está el bot ahora mismo y cuántos de ellos tienen
+ * todos los campos obligatorios de su config.json. Solo cuenta: el nombre o
+ * la config de otro servidor no se enseñan aquí.
+ * @param {import('discord.js').Client} client
+ */
+export async function countGuilds(client) {
+  const guildIds = [...client.guilds.cache.keys()];
+  const configs = await Promise.all(guildIds.map((guildId) => getConfig(guildId).catch(() => null)));
+  return { total: guildIds.length, complete: configs.filter((config) => config && isConfigComplete(config)).length };
+}
+
+/**
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 export async function execute(interaction) {
@@ -81,11 +94,12 @@ export async function execute(interaction) {
 
   const { albionServer: server } = await getConfig(interaction.guildId);
 
-  const [version, lastBackup, latencyMs, configResult] = await Promise.all([
+  const [version, lastBackup, latencyMs, configResult, guilds] = await Promise.all([
     readVersion(),
     findLastBackup(interaction.guildId),
     pingAlbionApi(server),
     loadConfig(interaction.guildId).catch((error) => ({ error })),
+    countGuilds(interaction.client),
   ]);
 
   // Los avisos de config (jugador repetido, members en un squad de gremio...)
@@ -110,6 +124,11 @@ export async function execute(interaction) {
     .addFields(
       { name: 'Uptime', value: formatUptime(process.uptime()), inline: true },
       { name: 'Versión', value: version, inline: true },
+      {
+        name: 'Servidores',
+        value: `En **${guilds.total}**, ${guilds.complete} con la configuración completa`,
+        inline: true,
+      },
       { name: `Latencia API Albion (${server})`, value: latencyMs !== null ? `${latencyMs}ms` : 'sin respuesta', inline: true },
       { name: 'Squads / jugadores cargados', value: squadsLine, inline: false },
       {

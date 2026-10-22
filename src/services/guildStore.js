@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, stat, access } from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR } from '../dataPaths.js';
 import { withFileLock, readJsonFile, atomicWriteJson } from './fileStore.js';
@@ -23,6 +23,7 @@ const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const EDITABLE_KEYS = new Set([
   'nombre',
   'activo',
+  'inactivoDesde',
   'officerRoleId',
   'logChannelId',
   'raffleRoleId',
@@ -51,6 +52,8 @@ export function defaultConfig(guildId) {
     guildId,
     nombre: null,
     activo: true,
+    // Fecha (ISO) en que echaron al bot del servidor; null mientras está dentro.
+    inactivoDesde: null,
     officerRoleId: null,
     logChannelId: null,
     raffleRoleId: null,
@@ -222,6 +225,20 @@ export async function updateConfig(guildId, cambios) {
  */
 export async function estaConfigurado(guildId) {
   return (await getConfig(guildId)).configuradoEn !== null;
+}
+
+/**
+ * ¿Tiene ya este servidor config.json? Distingue un servidor nuevo de uno
+ * que vuelve (cuyos datos se conservaron al echar al bot).
+ * @param {string} guildId
+ */
+export async function existeConfig(guildId) {
+  try {
+    await access(rutaDe(guildId, 'config.json'));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

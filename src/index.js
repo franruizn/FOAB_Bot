@@ -11,13 +11,15 @@ import * as config from './commands/config.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
 import { waitForAllFileWrites } from './services/fileStore.js';
 import { migrarAMultiguild } from './services/multiguildMigration.js';
-import { listarGuilds, getConfig, setConfig } from './services/guildStore.js';
+import { parseAllowedGuildIds, onGuildPresent, onGuildRemoved, reconcileGuilds } from './guildLifecycle.js';
+import { rejectOutsideGuild } from './permissions.js';
 import { notifyUncontrolledError, notifyDmInterrupted } from './logChannel.js';
 import { initializeRaffles, handleRaffleReactionAdd } from './raffleScheduler.js';
 import { takeInterruptedDmSend } from './services/massDm.js';
 import { DM_STATE_PATH } from './dataPaths.js';
 
 const { DISCORD_TOKEN } = process.env;
+const allowedGuildIds = parseAllowedGuildIds();
 
 if (!DISCORD_TOKEN) {
   throw new Error('Falta la variable de entorno DISCORD_TOKEN');
@@ -63,9 +65,11 @@ for (const command of [getkills, squads, attendance, health, sorteo, crearRol, d
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Sesión iniciada como ${readyClient.user.tag}`);
   try {
-    await syncGuildNames(readyClient);
+    // Antes que los sorteos: un servidor fuera de ALLOWED_GUILD_IDS se
+    // abandona aquí y sus sorteos (si los tuviera) ya no se reprograman.
+    await reconcileGuilds(readyClient, { allowed: allowedGuildIds });
   } catch (error) {
-    console.error('[guilds] Error sincronizando los nombres de servidor:', error?.stack ?? error);
+    console.error('[guild] Error reconciliando los servidores:', error?.stack ?? error);
   }
   try {
     await initializeRaffles(readyClient);
@@ -85,20 +89,17 @@ client.once(Events.ClientReady, async (readyClient) => {
   }
 });
 
-/**
- * Rellena/actualiza el campo "nombre" del config.json de cada servidor que
- * ya tiene carpeta con el nombre que tiene ahora en Discord. Solo
- * informativo (para quien abra el fichero), no crea carpetas nuevas.
- * @param {import('discord.js').Client} readyClient
- */
-async function syncGuildNames(readyClient) {
-  for (const guildId of await listarGuilds()) {
-    const guild = readyClient.guilds.cache.get(guildId);
-    if (!guild) continue;
-    const { nombre } = await getConfig(guildId);
-    if (nombre !== guild.name) await setConfig(guildId, { nombre: guild.name });
-  }
-}
+client.on(Events.GuildCreate, (guild) => {
+  onGuildPresent(guild, { allowed: allowedGuildIds }).catch((error) => {
+    console.error(`[guild] Error procesando la entrada en ${guild.id}:`, error?.stack ?? error);
+  });
+});
+
+client.on(Events.GuildDelete, (guild) => {
+  onGuildRemoved(guild).catch((error) => {
+    console.error(`[guild] Error procesando la salida de ${guild.id}:`, error?.stack ?? error);
+  });
+});
 
 /**
  * Igual que Date#toISOString(), pero con el offset de la zona horaria del
@@ -162,6 +163,11 @@ let isShuttingDown = false;
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (isShuttingDown) return; // no aceptar trabajo nuevo mientras cerramos
+
+  // Todo es por servidor (config, squads, sorteos): en un mensaje directo no
+  // hay guildId del que sacar nada. El registro ya los limita a servidores
+  // (contexts en deploy-commands.js); esto cubre un registro desactualizado.
+  if (await rejectOutsideGuild(interaction)) return;
 
   if (interaction.isAutocomplete()) {
     const command = client.commands.get(interaction.commandName);

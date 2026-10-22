@@ -8,58 +8,43 @@ import { data as sorteoCommand } from './commands/sorteo.js';
 import { data as crearRolCommand } from './commands/crearRol.js';
 import { data as dmCommand } from './commands/dm.js';
 import { data as configCommand } from './commands/config.js';
+import { planDeploy } from './deployPlan.js';
 
-const VALID_SCOPES = new Set(['guild', 'global', 'clean']);
 // Acepta el modo como argumento CLI (para que los scripts de package.json
 // sean portables entre shells: "VAR=x node ..." no funciona en cmd.exe de
 // Windows) o como env var DEPLOY_SCOPE, en ese orden. Por defecto "guild".
+// Qué se registra dónde en cada modo: ver deployPlan.js.
 const DEPLOY_SCOPE = process.argv[2] || process.env.DEPLOY_SCOPE || 'guild';
 
-if (!VALID_SCOPES.has(DEPLOY_SCOPE)) {
-  throw new Error(`DEPLOY_SCOPE inválido: "${DEPLOY_SCOPE}". Usa: guild | global | clean`);
-}
-
-const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
+const { DISCORD_TOKEN, CLIENT_ID } = process.env;
 
 if (!DISCORD_TOKEN || !CLIENT_ID) {
   throw new Error('Faltan variables de entorno: DISCORD_TOKEN y CLIENT_ID son requeridas');
 }
 
-if (DEPLOY_SCOPE !== 'global' && !GUILD_ID) {
-  throw new Error(`DEPLOY_SCOPE=${DEPLOY_SCOPE} requiere también GUILD_ID`);
-}
+const { steps, warnings } = planDeploy({
+  scope: DEPLOY_SCOPE,
+  commands: [getkillsCommand, squadsCommand, attendanceCommand, healthCommand, sorteoCommand, crearRolCommand, configCommand],
+  dmCommand,
+  env: process.env,
+});
+for (const warning of warnings) console.warn(`⚠️ ${warning}`);
 
 const rest = new REST().setToken(DISCORD_TOKEN);
 
 try {
-  if (DEPLOY_SCOPE === 'clean') {
-    // Borra los comandos de guild. Necesario al pasar de dev (guild) a prod
-    // (global): si dejas ambos registrados a la vez, Discord los muestra
-    // duplicados en ese servidor.
-    console.log(`Borrando los slash commands de guild en el servidor ${GUILD_ID}...`);
-    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: [] });
-    console.log('Comandos de guild eliminados.');
-  } else {
-    const commands = [
-      getkillsCommand,
-      squadsCommand,
-      attendanceCommand,
-      healthCommand,
-      sorteoCommand,
-      crearRolCommand,
-      dmCommand,
-      configCommand,
-    ].map((command) => command.toJSON());
-
-    if (DEPLOY_SCOPE === 'guild') {
-      console.log(`[dev] Registrando ${commands.length} slash commands en el servidor ${GUILD_ID} (cambios instantáneos)...`);
-      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
-      console.log('Comandos registrados en el servidor. Si antes usaste DEPLOY_SCOPE=global aquí, corre "npm run deploy:clean" para no duplicarlos.');
-    } else {
-      console.log(`[prod] Registrando ${commands.length} slash commands GLOBALES (pueden tardar hasta 1 hora en propagarse)...`);
-      await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-      console.log('Comandos globales registrados. Si tenías comandos de guild de desarrollo, corre "npm run deploy:clean" para evitar duplicados.');
-    }
+  for (const { target, body, label } of steps) {
+    console.log(`${label}...`);
+    const route = target === 'global' ? Routes.applicationCommands(CLIENT_ID) : Routes.applicationGuildCommands(CLIENT_ID, target);
+    await rest.put(route, { body });
+  }
+  console.log('Hecho.');
+  if (DEPLOY_SCOPE === 'global') {
+    console.log(
+      'Si el servidor de desarrollo (GUILD_ID) tenía comandos de guild y no es DM_GUILD_ID, corre "npm run deploy:clean" o saldrán duplicados.',
+    );
+  } else if (DEPLOY_SCOPE === 'guild') {
+    console.log('Si también hay comandos globales registrados, en este servidor saldrán duplicados: "npm run deploy:clean" al terminar.');
   }
 } catch (error) {
   console.error('Error registrando comandos:', error);

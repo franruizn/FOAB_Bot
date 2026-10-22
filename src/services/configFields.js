@@ -111,6 +111,16 @@ export function fieldBySub(sub) {
 }
 
 /**
+ * ¿Tiene el servidor todos los campos obligatorios? No mira si un rol o canal
+ * configurado sigue existiendo (eso necesita el servidor de Discord a mano;
+ * lo hace /config ver).
+ * @param {object} config
+ */
+export function isConfigComplete(config) {
+  return CONFIG_FIELDS.every((field) => !field.required || Boolean(config[field.key]));
+}
+
+/**
  * "Este servidor no tiene X. Un administrador puede ponerlo con /config y."
  * @param {string} key
  */

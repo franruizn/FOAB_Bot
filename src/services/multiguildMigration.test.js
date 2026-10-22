@@ -76,6 +76,7 @@ test('migración: mueve squads.json, raffles.json y backups/ al servidor y crea 
     guildId: GUILD_ID,
     nombre: null,
     activo: true,
+    inactivoDesde: null,
     officerRoleId: 'officer-role',
     logChannelId: 'log-channel',
     raffleRoleId: 'raffle-role',
