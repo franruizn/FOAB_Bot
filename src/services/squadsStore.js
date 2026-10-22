@@ -12,12 +12,21 @@ import {
 } from './config.js';
 import { withFileLock, readJsonFile, backupCurrentFile, atomicWriteJson } from './fileStore.js';
 import { rutaDe, getConfig } from './guildStore.js';
+import { LocalizedError } from '../i18n.js';
 
 const SQUAD_KEY_MAX_LENGTH = 32;
 
-export class SquadCommandError extends Error {
-  constructor(message) {
-    super(message);
+/**
+ * Entrada de /squads que no se puede aplicar. El texto sale de src/i18n.js
+ * (squadsError.*) en el idioma de quien lo vaya a leer.
+ */
+export class SquadCommandError extends LocalizedError {
+  /**
+   * @param {string} key
+   * @param {Record<string, string | number>} [values]
+   */
+  constructor(key, values) {
+    super(key, values);
     this.name = 'SquadCommandError';
   }
 }
@@ -33,17 +42,14 @@ export class SquadCommandError extends Error {
 export function normalizeSquadKey(input) {
   const key = String(input).trim().toLowerCase();
   if (key.length === 0 || key.length > SQUAD_KEY_MAX_LENGTH) {
-    throw new SquadCommandError(`La clave del squad debe tener entre 1 y ${SQUAD_KEY_MAX_LENGTH} caracteres.`);
+    throw new SquadCommandError('squadsError.keyLength', { max: SQUAD_KEY_MAX_LENGTH });
   }
   for (const char of key) {
     const isLower = char >= 'a' && char <= 'z';
     const isDigit = char >= '0' && char <= '9';
     const isDash = char === '-';
     if (!isLower && !isDigit && !isDash) {
-      throw new SquadCommandError(
-        `La clave del squad "${key}" solo puede contener minúsculas (a-z), números y guiones. ` +
-          'Si es un gremio de Albion, créalo con is-guild:true.',
-      );
+      throw new SquadCommandError('squadsError.keyChars', { key });
     }
   }
   return key;
@@ -58,7 +64,7 @@ export function normalizeSquadKey(input) {
 export function normalizeGuildSquadName(input) {
   const name = String(input).trim();
   if (!isValidGuildName(name)) {
-    throw new SquadCommandError(`El nombre del gremio debe tener entre 1 y ${MAX_GUILD_NAME_LENGTH} caracteres.`);
+    throw new SquadCommandError('squadsError.guildNameLength', { max: MAX_GUILD_NAME_LENGTH });
   }
   return name;
 }
@@ -66,16 +72,14 @@ export function normalizeGuildSquadName(input) {
 /** Clave para BUSCAR un squad existente (de cualquier tipo): sin validar formato. */
 function lookupKey(input) {
   const key = String(input).trim().toLowerCase();
-  if (key.length === 0) throw new SquadCommandError('Indica un squad.');
+  if (key.length === 0) throw new SquadCommandError('squadsError.noSquad');
   return key;
 }
 
 function normalizePlayerName(input) {
   const name = String(input).trim();
   if (!isValidPlayerName(name)) {
-    throw new SquadCommandError(
-      `El nombre de jugador "${input}" debe tener entre ${MIN_NAME_LENGTH} y ${MAX_NAME_LENGTH} caracteres.`,
-    );
+    throw new SquadCommandError('squadsError.playerLength', { name: String(input), min: MIN_NAME_LENGTH, max: MAX_NAME_LENGTH });
   }
   return name;
 }
@@ -92,11 +96,12 @@ function findPlayerCurrentSquad(raw, nameLower) {
   return null;
 }
 
+/**
+ * @param {string} squadKey
+ * @param {'add' | 'remove' | 'move'} action - una frase completa por acción en i18n
+ */
 function rejectGuildSquad(squadKey, action) {
-  throw new SquadCommandError(
-    `"${squadKey}" es un squad de gremio: sus miembros salen del gremio de Albion "${squadKey}" en cada batalla, ` +
-      `no de una lista, así que no se puede ${action}. Para seguir a jugadores concretos, crea un squad de jugadores.`,
-  );
+  throw new SquadCommandError(`squadsError.guildSquad.${action}`, { squad: squadKey });
 }
 
 function sameName(a, b) {
@@ -106,10 +111,7 @@ function sameName(a, b) {
 async function rejectIfMainGuild(guildId, guildName) {
   const { albionGuild } = await getConfig(guildId);
   if (sameName(albionGuild, guildName)) {
-    throw new SquadCommandError(
-      `"${guildName}" es el gremio principal de este servidor: ya cuenta como MAIN ZERG. Un squad de gremio con ` +
-        'ese nombre duplicaría a todo el mundo.',
-    );
+    throw new SquadCommandError('squadsError.mainGuild', { guild: guildName });
   }
 }
 
@@ -166,8 +168,8 @@ export async function createSquad(guildId, nameInput, { isGuild = false } = {}) 
   return mutateSquadsConfig(guildId, (raw) => {
     const existing = findSquadKeyCaseInsensitive(raw, key.toLowerCase());
     if (existing) {
-      const kind = raw.squads[existing].isGuild ? 'de gremio' : 'de jugadores';
-      throw new SquadCommandError(`Ya existe un squad ${kind} llamado "${existing}".`);
+      const kind = raw.squads[existing].isGuild ? 'guild' : 'players';
+      throw new SquadCommandError(`squadsError.exists.${kind}`, { squad: existing });
     }
     return {
       data: { ...raw, squads: { ...raw.squads, [key]: { isGuild, members: [] } } },
@@ -181,7 +183,7 @@ export async function deleteSquad(guildId, squadKeyInput) {
   return mutateSquadsConfig(guildId, (raw) => {
     const existingKey = findSquadKeyCaseInsensitive(raw, key);
     if (!existingKey) {
-      throw new SquadCommandError(`El squad "${squadKeyInput}" no existe.`);
+      throw new SquadCommandError('squadsError.notFound', { squad: squadKeyInput });
     }
     const { isGuild, members } = raw.squads[existingKey];
     const squads = { ...raw.squads };
@@ -198,7 +200,7 @@ export async function addPlayers(guildId, squadKeyInput, playerNamesInput) {
     .filter((name) => name.length > 0);
 
   if (requestedNames.length === 0) {
-    throw new SquadCommandError('Debes indicar al menos un nombre de jugador.');
+    throw new SquadCommandError('squadsError.noPlayers');
   }
 
   const normalizedNames = requestedNames.map(normalizePlayerName);
@@ -206,9 +208,9 @@ export async function addPlayers(guildId, squadKeyInput, playerNamesInput) {
   return mutateSquadsConfig(guildId, (raw) => {
     const existingKey = findSquadKeyCaseInsensitive(raw, key);
     if (!existingKey) {
-      throw new SquadCommandError(`El squad "${squadKeyInput}" no existe. Créalo antes con /squads create.`);
+      throw new SquadCommandError('squadsError.notFoundCreate', { squad: squadKeyInput });
     }
-    if (raw.squads[existingKey].isGuild) rejectGuildSquad(existingKey, 'añadirle jugadores a mano');
+    if (raw.squads[existingKey].isGuild) rejectGuildSquad(existingKey, 'add');
 
     const currentMembers = raw.squads[existingKey].members;
     const currentLower = new Set(currentMembers.map((m) => m.toLowerCase()));
@@ -247,14 +249,14 @@ export async function removePlayer(guildId, squadKeyInput, playerNameInput) {
   return mutateSquadsConfig(guildId, (raw) => {
     const existingKey = findSquadKeyCaseInsensitive(raw, key);
     if (!existingKey) {
-      throw new SquadCommandError(`El squad "${squadKeyInput}" no existe.`);
+      throw new SquadCommandError('squadsError.notFound', { squad: squadKeyInput });
     }
-    if (raw.squads[existingKey].isGuild) rejectGuildSquad(existingKey, 'quitarle jugadores a mano');
+    if (raw.squads[existingKey].isGuild) rejectGuildSquad(existingKey, 'remove');
 
     const currentMembers = raw.squads[existingKey].members;
     const index = currentMembers.findIndex((m) => m.toLowerCase() === nameLower);
     if (index === -1) {
-      throw new SquadCommandError(`"${playerNameInput}" no está en el squad "${existingKey}".`);
+      throw new SquadCommandError('squadsError.notInSquad', { player: playerNameInput, squad: existingKey });
     }
 
     const removedName = currentMembers[index];
@@ -274,7 +276,7 @@ export async function removePlayer(guildId, squadKeyInput, playerNameInput) {
 export async function describeSquad(guildId, squadKeyInput) {
   const key = lookupKey(squadKeyInput);
   const squad = (await loadConfig(guildId)).squads.get(key);
-  if (!squad) throw new SquadCommandError(`El squad "${squadKeyInput}" no existe.`);
+  if (!squad) throw new SquadCommandError('squadsError.notFound', { squad: squadKeyInput });
   return { key: squad.isGuild ? squad.guildName : key, isGuild: squad.isGuild };
 }
 
@@ -289,17 +291,17 @@ export async function renameSquad(guildId, squadKeyInput, newKeyInput) {
   return mutateSquadsConfig(guildId, (raw) => {
     const existingOldKey = findSquadKeyCaseInsensitive(raw, oldKey);
     if (!existingOldKey) {
-      throw new SquadCommandError(`El squad "${squadKeyInput}" no existe.`);
+      throw new SquadCommandError('squadsError.notFound', { squad: squadKeyInput });
     }
     const { isGuild } = raw.squads[existingOldKey];
     if (Boolean(current?.isGuild) !== isGuild) {
-      throw new SquadCommandError(`El squad "${existingOldKey}" cambió mientras tanto. Vuelve a intentarlo.`);
+      throw new SquadCommandError('squadsError.changed', { squad: existingOldKey });
     }
 
     if (existingOldKey.toLowerCase() !== newKey.toLowerCase()) {
       const existingNewKey = findSquadKeyCaseInsensitive(raw, newKey.toLowerCase());
       if (existingNewKey) {
-        throw new SquadCommandError(`Ya existe un squad llamado "${existingNewKey}".`);
+        throw new SquadCommandError('squadsError.existsAny', { squad: existingNewKey });
       }
     }
 
@@ -319,16 +321,16 @@ export async function movePlayer(guildId, playerNameInput, targetSquadKeyInput) 
   return mutateSquadsConfig(guildId, (raw) => {
     const existingTargetKey = findSquadKeyCaseInsensitive(raw, targetKey);
     if (!existingTargetKey) {
-      throw new SquadCommandError(`El squad "${targetSquadKeyInput}" no existe.`);
+      throw new SquadCommandError('squadsError.notFound', { squad: targetSquadKeyInput });
     }
-    if (raw.squads[existingTargetKey].isGuild) rejectGuildSquad(existingTargetKey, 'mover jugadores a él');
+    if (raw.squads[existingTargetKey].isGuild) rejectGuildSquad(existingTargetKey, 'move');
 
     const fromKey = findPlayerCurrentSquad(raw, nameLower);
     if (!fromKey) {
-      throw new SquadCommandError(`"${playerNameInput}" no está en ningún squad. Usa /squads add para añadirlo.`);
+      throw new SquadCommandError('squadsError.playerNoSquad', { player: playerNameInput });
     }
     if (fromKey.toLowerCase() === existingTargetKey.toLowerCase()) {
-      throw new SquadCommandError(`"${playerNameInput}" ya está en "${existingTargetKey}".`);
+      throw new SquadCommandError('squadsError.alreadyIn', { player: playerNameInput, squad: existingTargetKey });
     }
 
     const originalName = raw.squads[fromKey].members.find((m) => m.toLowerCase() === nameLower);

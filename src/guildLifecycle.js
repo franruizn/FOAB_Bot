@@ -1,5 +1,6 @@
 import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import { getConfig, setConfig, existeConfig, listarGuilds } from './services/guildStore.js';
+import { t, langFromLocale } from './i18n.js';
 
 // Entrar y salir de servidores. Los datos de un servidor NUNCA se borran al
 // echar al bot: se marca activo=false con la fecha, y si lo vuelven a añadir
@@ -8,15 +9,6 @@ import { getConfig, setConfig, existeConfig, listarGuilds } from './services/gui
 // Un servidor nuevo empieza con config.json por defecto y SIN squads.json:
 // no se copia ningún semilla, los jugadores de un gremio no son de otro.
 
-const WELCOME_LINES = [
-  '👋 ¡Hola! Todavía no estoy configurado en este servidor.',
-  'Un administrador tiene que ejecutar `/config ver`: enseña qué falta y con qué comando se pone.',
-  'Hasta entonces, cada comando que necesite algo sin configurar dirá qué le falta.',
-];
-const WELCOME_BACK_LINES = [
-  '👋 He vuelto con la configuración y los squads que tenía este servidor.',
-  'Un administrador puede revisarlos con `/config ver`.',
-];
 const WRITE_PERMISSIONS = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages];
 
 /**
@@ -54,13 +46,18 @@ export function findWelcomeChannel(guild) {
   );
 }
 
-async function sendWelcome(guild, lines) {
+/**
+ * @param {import('discord.js').Guild} guild
+ * @param {string} key - welcome.new / welcome.back
+ * @param {string} lang - idioma del servidor: la bienvenida la lee todo el canal
+ */
+async function sendWelcome(guild, key, lang) {
   const channel = findWelcomeChannel(guild);
   if (!channel) {
     logEvent('Sin canal donde escribir la bienvenida', { guildId: guild.id });
     return;
   }
-  await channel.send(lines.join('\n')).catch((error) => {
+  await channel.send(t(key, lang)).catch((error) => {
     console.error(`[guild] No se pudo enviar la bienvenida a ${guild.id}:`, error?.message ?? error);
   });
 }
@@ -68,9 +65,12 @@ async function sendWelcome(guild, lines) {
 /**
  * El bot está en `guild` (acaba de entrar, o lo comprueba al arrancar).
  * - Fuera de ALLOWED_GUILD_IDS: sale y lo registra, sin crear nada en disco.
- * - Nuevo: crea su carpeta con config.json por defecto y da la bienvenida.
+ * - Nuevo: crea su carpeta con config.json por defecto, con el idioma del
+ *   servidor de Discord (preferredLocale), y da la bienvenida en ese idioma.
  * - Vuelve tras haberlo echado: lo reactiva con todo lo que tenía.
  * - Ya activo: solo actualiza el nombre.
+ * En los dos últimos, si no tiene idioma (una config de antes de que
+ * existiera) se le pone el de su preferredLocale.
  * @param {import('discord.js').Guild} guild
  * @param {{ allowed: Set<string> | null }} options
  * @returns {Promise<'left' | 'new' | 'returned' | 'active'>}
@@ -84,23 +84,28 @@ export async function onGuildPresent(guild, { allowed }) {
     return 'left';
   }
 
+  // Un servidor de Discord en español arranca con el bot en español sin que
+  // nadie lo configure.
+  const localeLang = langFromLocale(guild.preferredLocale);
+
   if (!(await existeConfig(guild.id))) {
     await getConfig(guild.id); // crea config.json por defecto
-    await setConfig(guild.id, { nombre: guild.name });
-    logEvent('Servidor nuevo', { guildId: guild.id, nombre: guild.name });
-    await sendWelcome(guild, WELCOME_LINES);
+    await setConfig(guild.id, { nombre: guild.name, idioma: localeLang });
+    logEvent('Servidor nuevo', { guildId: guild.id, nombre: guild.name, idioma: localeLang });
+    await sendWelcome(guild, 'welcome.new', localeLang);
     return 'new';
   }
 
-  const { activo, nombre } = await getConfig(guild.id);
+  const { activo, nombre, idioma } = await getConfig(guild.id);
+  const lang = idioma ?? localeLang;
   if (!activo) {
-    await setConfig(guild.id, { activo: true, inactivoDesde: null, nombre: guild.name });
+    await setConfig(guild.id, { activo: true, inactivoDesde: null, nombre: guild.name, idioma: lang });
     logEvent('Servidor recuperado: conserva su configuración y sus squads', { guildId: guild.id, nombre: guild.name });
-    await sendWelcome(guild, WELCOME_BACK_LINES);
+    await sendWelcome(guild, 'welcome.back', lang);
     return 'returned';
   }
 
-  if (nombre !== guild.name) await setConfig(guild.id, { nombre: guild.name });
+  if (nombre !== guild.name || idioma !== lang) await setConfig(guild.id, { nombre: guild.name, idioma: lang });
   return 'active';
 }
 

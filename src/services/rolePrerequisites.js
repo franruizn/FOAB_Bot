@@ -6,9 +6,16 @@
 const ROLE_LIMIT_WARNING = 200;
 const ROLE_LIMIT_MAX = 250;
 
-export class RolePrerequisiteError extends Error {
-  constructor(message) {
-    super(message);
+import { LocalizedError } from '../i18n.js';
+
+/** El bot no puede crear el rol. El texto sale de src/i18n.js (rolePrereq.*). */
+export class RolePrerequisiteError extends LocalizedError {
+  /**
+   * @param {string} key
+   * @param {Record<string, string | number>} [values]
+   */
+  constructor(key, values) {
+    super(key, values);
     this.name = 'RolePrerequisiteError';
   }
 }
@@ -18,34 +25,29 @@ export class RolePrerequisiteError extends Error {
  * posición 1 (justo encima de @everyone), y el servidor no puede estar ya en
  * el tope de 250 roles de Discord. No muta nada.
  * @param {import('discord.js').Guild} guild
- * @returns {{ avisoCapacidad: string | null }}
+ * @returns {{ avisoCapacidad: { key: string, values: object } | null }} aviso de cupo, como clave de i18n
  * @throws {RolePrerequisiteError}
  */
 export function verificarPrerequisitosDeRol(guild) {
   const me = guild.members.me;
   if (!me?.permissions?.has?.('ManageRoles')) {
-    throw new RolePrerequisiteError('El bot no tiene el permiso "Gestionar roles" en este servidor. Actívaselo antes de crear un rol.');
+    throw new RolePrerequisiteError('rolePrereq.noPermission');
   }
 
   const posicionBot = me.roles.highest.position;
   if (posicionBot <= 1) {
-    throw new RolePrerequisiteError(
-      'El rol del bot está demasiado abajo en la jerarquía (tiene que estar por encima de la posición 1, justo ' +
-        'encima de @everyone). Sube el rol del bot en Ajustes del servidor -> Roles antes de crear un rol.',
-    );
+    throw new RolePrerequisiteError('rolePrereq.tooLow');
   }
 
   const totalRoles = guild.roles.cache.size;
   if (totalRoles >= ROLE_LIMIT_MAX) {
-    throw new RolePrerequisiteError(
-      `El servidor ya tiene ${totalRoles} roles (el máximo de Discord es ${ROLE_LIMIT_MAX}). No se puede crear el rol.`,
-    );
+    throw new RolePrerequisiteError('rolePrereq.limit', { count: totalRoles, max: ROLE_LIMIT_MAX });
   }
 
   return {
     avisoCapacidad:
       totalRoles >= ROLE_LIMIT_WARNING
-        ? `El servidor tiene ${totalRoles} roles, cerca del máximo de ${ROLE_LIMIT_MAX}.`
+        ? { key: 'rolePrereq.nearLimit', values: { count: totalRoles, max: ROLE_LIMIT_MAX } }
         : null,
   };
 }

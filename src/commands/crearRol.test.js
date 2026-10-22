@@ -90,11 +90,13 @@ function makeInteraction({ nombre, lista, guild, interactionId = 'inter-1', butt
   return {
     id: interactionId,
     guildId: GUILD_ID,
+    // Oficial con el cliente en español: las respuestas de /create-role son efímeras.
+    locale: 'es-ES',
     user: { id: 'officer-1', tag: 'Officer#0001' },
     member: { roles: { cache: new Map([['officer-role', true]]) } },
     guild,
     options: {
-      getString: (name) => (name === 'nombre' ? nombre : lista),
+      getString: (name) => (name === 'name' ? nombre : lista),
     },
     reply: async (payload) => {
       replies.push(payload);

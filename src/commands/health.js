@@ -7,15 +7,18 @@ import { SERVER_HOSTS } from '../services/albionApi.js';
 import { getConfig, rutaDe } from '../services/guildStore.js';
 import { ensureOfficer } from '../permissions.js';
 import { isConfigComplete } from '../services/configFields.js';
+import { t, tn, userLang, localizedName, localizedDescription } from '../i18n.js';
 
 const PACKAGE_JSON_PATH = fileURLToPath(new URL('../../package.json', import.meta.url));
 const EMBED_COLOR = 0x00ff9d;
 const PING_TIMEOUT_MS = 5_000;
 
+// /health en inglés, /estado con el cliente en español: el mismo comando.
+//
 // Visible para todos en el picker de Discord a propósito: el filtro real es
 // ensureOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
-export const data = new SlashCommandBuilder().setName('health').setDescription('Estado del bot (solo oficiales)');
+export const data = localizedDescription(localizedName(new SlashCommandBuilder(), 'cmd.health.name'), 'cmd.health.description');
 
 function formatUptime(seconds) {
   const days = Math.floor(seconds / 86400);
@@ -33,9 +36,9 @@ function formatUptime(seconds) {
 async function readVersion() {
   try {
     const raw = await readFile(PACKAGE_JSON_PATH, 'utf8');
-    return JSON.parse(raw).version ?? 'desconocida';
+    return JSON.parse(raw).version ?? null;
   } catch {
-    return 'desconocida';
+    return null;
   }
 }
 
@@ -89,6 +92,8 @@ export async function countGuilds(client) {
  */
 export async function execute(interaction) {
   if (!(await ensureOfficer(interaction))) return;
+  // Efímero: idioma de quien lo ejecuta.
+  const lang = userLang(interaction);
 
   await interaction.deferReply({ ephemeral: true });
 
@@ -106,34 +111,40 @@ export async function execute(interaction) {
   // no rompen nada y por eso no salen en ningún otro sitio: aquí sí.
   let squadsLine;
   if ('error' in configResult) {
-    squadsLine = `⚠️ No se pudo cargar squads.json (${configResult.error.message})`;
+    const detail = configResult.error.localized?.(lang) ?? configResult.error.message;
+    squadsLine = t('health.squads.loadError', lang, { detail });
   } else {
     const guildSquads = configResult.guildToSquad.size;
     const playerSquads = configResult.squadOrder.length - guildSquads;
-    squadsLine = [
-      `${playerSquads} squads de jugadores (${configResult.playerToSquad.size} jugadores), ${guildSquads} gremio(s) seguido(s)`,
-      ...configResult.warnings.map((warning) => `⚠️ ${warning}`),
-    ]
+    const summary =
+      `${tn('health.squads.playerSquads', playerSquads, lang)} ` +
+      `(${tn('health.squads.players', configResult.playerToSquad.size, lang)}), ` +
+      tn('health.squads.followed', guildSquads, lang);
+    squadsLine = [summary, ...configResult.notices.map(({ key, values }) => `⚠️ ${t(key, lang, values)}`)]
       .join('\n')
       .slice(0, 1024);
   }
 
   const embed = new EmbedBuilder()
-    .setTitle('🩺 FOAB Bot — Health')
+    .setTitle(t('health.title', lang))
     .setColor(EMBED_COLOR)
     .addFields(
-      { name: 'Uptime', value: formatUptime(process.uptime()), inline: true },
-      { name: 'Versión', value: version, inline: true },
+      { name: t('health.field.uptime', lang), value: formatUptime(process.uptime()), inline: true },
+      { name: t('health.field.version', lang), value: version ?? t('health.unknownVersion', lang), inline: true },
       {
-        name: 'Servidores',
-        value: `En **${guilds.total}**, ${guilds.complete} con la configuración completa`,
+        name: t('health.field.servers', lang),
+        value: t('health.servers.value', lang, { total: guilds.total, complete: guilds.complete }),
         inline: true,
       },
-      { name: `Latencia API Albion (${server})`, value: latencyMs !== null ? `${latencyMs}ms` : 'sin respuesta', inline: true },
-      { name: 'Squads / jugadores cargados', value: squadsLine, inline: false },
       {
-        name: 'Último backup',
-        value: lastBackup ? `<t:${Math.floor(lastBackup.getTime() / 1000)}:R>` : 'sin backups todavía',
+        name: t('health.field.latency', lang, { server }),
+        value: latencyMs !== null ? t('health.latency.value', lang, { ms: latencyMs }) : t('health.latency.none', lang),
+        inline: true,
+      },
+      { name: t('health.field.squads', lang), value: squadsLine, inline: false },
+      {
+        name: t('health.field.lastBackup', lang),
+        value: lastBackup ? `<t:${Math.floor(lastBackup.getTime() / 1000)}:R>` : t('health.noBackups', lang),
         inline: false,
       },
     )

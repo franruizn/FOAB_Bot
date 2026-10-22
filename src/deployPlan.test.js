@@ -72,21 +72,21 @@ test('registro real: no queda ningún /cta, /comp ni /maestria', async () => {
   assert.ok(registered.every((name) => !/^(cta|comp|maestria)$/.test(name)), registered.join(', '));
 });
 
-// --- IDIOMA: pendiente, no implementado (todo: se informan sin romper la suite) ---
+// --- IDIOMA: lo que se registra (el detalle del árbol entero está en src/i18n.test.js) ---
 
 const json = (name) => realPlan.steps[0].body.find((c) => c.name === name);
 
-test('/raffle en inglés, /sorteo con el cliente en español: el mismo comando', { todo: 'BLOQUEANTE: no hay localizaciones' }, () => {
+test('/raffle en inglés, /sorteo con el cliente en español: el mismo comando', () => {
   const raffle = json('raffle');
   assert.ok(raffle, 'no existe /raffle');
   assert.equal(raffle.name_localizations?.['es-ES'], 'sorteo');
 });
 
-test('/crear-rol ya no existe suelto: es la localización española de un nombre en inglés', { todo: 'BLOQUEANTE: no hay localizaciones' }, () => {
+test('/crear-rol ya no existe suelto: es la localización española de un nombre en inglés', () => {
   assert.equal(json('crear-rol'), undefined);
 });
 
-test('/squads y /config: subcomandos en inglés, descripciones localizadas', { todo: 'BLOQUEANTE: /config tiene subcomandos en español y nada está localizado' }, () => {
+test('/squads y /config: subcomandos en inglés, descripciones localizadas', () => {
   for (const name of ['squads', 'config']) {
     for (const sub of json(name).options) {
       assert.match(sub.name, /^[a-z-]+$/);

@@ -5,23 +5,24 @@ import { ConfigError } from './services/config.js';
 import { MissingConfigError } from './services/configFields.js';
 import { errorEmbed } from './ui/errorEmbed.js';
 import { isOfficer } from './permissions.js';
+import { t, replyLang } from './i18n.js';
 
 /**
- * Clasifica un error y arma el embed correspondiente. Los errores "conocidos"
- * (entrada de usuario o fallos esperados de la API) se loguean en una línea;
- * cualquier error no reconocido se loguea con el stack completo, ya que ahí
- * sí puede tratarse de un bug real. `known: false` marca justo ese último
- * caso, para que el llamador decida si avisa en el canal de logs del servidor.
+ * Clasifica un error y arma el embed correspondiente en `lang`. Los errores
+ * "conocidos" (entrada de usuario o fallos esperados de la API) se loguean en
+ * una línea; cualquier error no reconocido se loguea con el stack completo,
+ * ya que ahí sí puede tratarse de un bug real. `known: false` marca justo ese
+ * último caso, para que el llamador decida si avisa en el canal de logs del
+ * servidor.
+ * @param {unknown} error
+ * @param {string} lang
  * @returns {{ embed: import('discord.js').EmbedBuilder, officerOnly: boolean, known: boolean }}
  */
-function classifyError(error) {
+function classifyError(error, lang) {
   if (error instanceof InvalidLinkError) {
     console.error(`InvalidLinkError: ${error.message}`);
     return {
-      embed: errorEmbed(
-        'Enlace de albionbb no válido',
-        `${error.message}\n\nEjemplo válido: \`https://europe.albionbb.com/battles/418186013\``,
-      ),
+      embed: errorEmbed(t('error.invalidLink.title', lang), `${error.localized(lang)}\n\n${t('error.invalidLink.example', lang)}`),
       officerOnly: false,
       known: true,
     };
@@ -30,7 +31,7 @@ function classifyError(error) {
   if (error instanceof AlbionApiError && error.status === 404) {
     console.error(`AlbionApiError 404 (battleId=${error.battleId})`);
     return {
-      embed: errorEmbed('Batalla no encontrada', 'No se encontró esa batalla en la API oficial.'),
+      embed: errorEmbed(t('error.battleNotFound.title', lang), t('error.battleNotFound.body', lang)),
       officerOnly: false,
       known: true,
     };
@@ -39,7 +40,7 @@ function classifyError(error) {
   if (error instanceof AlbionApiError && error.status >= 500) {
     console.error(`AlbionApiError ${error.status} (battleId=${error.battleId})`);
     return {
-      embed: errorEmbed('API de Albion no disponible', 'La API de Albion no responde, inténtalo en un minuto.'),
+      embed: errorEmbed(t('error.albionDown.title', lang), t('error.albionDown.body', lang)),
       officerOnly: false,
       known: true,
     };
@@ -48,7 +49,7 @@ function classifyError(error) {
   if (error instanceof AlbionbbApiError && error.status === 404) {
     console.error(`AlbionbbApiError 404 (guildId=${error.guildId})`);
     return {
-      embed: errorEmbed('Gremio no encontrado en albionbb', 'No se encontró ese gremio en albionbb.'),
+      embed: errorEmbed(t('error.albionbbGuildNotFound.title', lang), t('error.albionbbGuildNotFound.body', lang)),
       officerOnly: false,
       known: true,
     };
@@ -57,7 +58,7 @@ function classifyError(error) {
   if (error instanceof AlbionbbApiError) {
     console.error(`AlbionbbApiError ${error.status} (guildId=${error.guildId})`);
     return {
-      embed: errorEmbed('albionbb no disponible', 'albionbb no responde ahora mismo, inténtalo más tarde.'),
+      embed: errorEmbed(t('error.albionbbDown.title', lang), t('error.albionbbDown.body', lang)),
       officerOnly: false,
       known: true,
     };
@@ -67,9 +68,9 @@ function classifyError(error) {
   // esto es un servidor a medio configurar: lo ve quien lo ejecutó, porque
   // el mensaje ya dice qué falta y con qué comando se arregla.
   if (error instanceof MissingConfigError) {
-    console.error(`MissingConfigError (${error.key})`);
+    console.error(`MissingConfigError (${error.field})`);
     return {
-      embed: errorEmbed('Falta configuración', error.message),
+      embed: errorEmbed(t('common.missingConfig.title', lang), error.localized(lang)),
       officerOnly: false,
       known: true,
     };
@@ -78,18 +79,15 @@ function classifyError(error) {
   if (error instanceof ConfigError) {
     console.error(`ConfigError (${error.reason}) en "${error.path}": ${error.message}`);
     return {
-      embed: errorEmbed('Error de configuración', error.message),
+      embed: errorEmbed(t('error.config.title', lang), error.localized(lang)),
       officerOnly: true,
       known: true,
     };
   }
 
-  console.error('Error inesperado en interacción:', error.stack ?? error);
+  console.error('Error inesperado en interacción:', error?.stack ?? error);
   return {
-    embed: errorEmbed(
-      'Ha ocurrido un error inesperado',
-      'Inténtalo de nuevo en unos minutos. Si el problema persiste, avisa a un oficial.',
-    ),
+    embed: errorEmbed(t('error.unexpected.title', lang), t('error.unexpected.body', lang)),
     officerOnly: false,
     known: false,
   };
@@ -99,17 +97,20 @@ function classifyError(error) {
  * Maneja cualquier error lanzado durante la ejecución de un comando: clasifica
  * el error, construye el embed adecuado (ocultando detalle técnico de
  * ConfigError a quien no sea oficial) y responde por el canal correcto según
- * el estado de la interacción.
+ * el estado de la interacción. El idioma sigue la regla de src/i18n.js: si la
+ * respuesta ya era pública (deferReply sin ephemeral), la lee el servidor; si
+ * no, solo quien ejecutó el comando.
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  * @param {unknown} error
  * @returns {Promise<{ known: boolean }>} known=false si el error cayó en el genérico (no tipado)
  */
 export async function handleInteractionError(interaction, error) {
-  const { embed, officerOnly, known } = classifyError(error);
+  const lang = await replyLang(interaction).catch(() => 'en');
+  const { embed, officerOnly, known } = classifyError(error, lang);
 
   const visibleEmbed =
     officerOnly && !(await isOfficer(interaction).catch(() => false))
-      ? errorEmbed('Ha ocurrido un error', 'Ha ocurrido un error de configuración. Contacta a un oficial.')
+      ? errorEmbed(t('error.configHidden.title', lang), t('error.configHidden.body', lang))
       : embed;
 
   const replyPayload = { embeds: [visibleEmbed], ephemeral: true };

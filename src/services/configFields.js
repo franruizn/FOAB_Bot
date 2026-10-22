@@ -1,98 +1,35 @@
 import { getConfig } from './guildStore.js';
+import { LocalizedError, t, commandName } from '../i18n.js';
 
-// Los campos del config.json de un servidor que se editan con /config: cómo
-// se llaman de cara al usuario, con qué subcomando se fijan y qué deja de
-// funcionar mientras falten. /config ver y los mensajes de "falta X" de los
-// demás comandos salen de aquí, así que no pueden contradecirse.
+// Los campos del config.json de un servidor que se editan con /config: con
+// qué subcomando se fijan y qué deja de funcionar mientras falten. /config
+// view y los mensajes de "falta X" de los demás comandos salen de aquí, así
+// que no pueden contradecirse. Los textos están en src/i18n.js, bajo
+// config.field.<key>.label / .missing / .gap.
 //
 //   required: sin él, algún comando no funciona (o no queda rastro de nada)
-//   blocks:   comandos que se niegan a funcionar mientras falte
-//   impact:   qué pasa mientras falte, para los que no bloquean nada
+//   blocks:   comandos (su clave en i18n: cmd.<clave>.name) que se niegan a
+//             funcionar mientras falte
 
 /**
  * @typedef {object} ConfigField
  * @property {string} key - campo de config.json
- * @property {string} sub - subcomando de /config que lo fija (y su nombre en /config reset)
- * @property {string} label
- * @property {'role' | 'channel' | 'text'} kind
+ * @property {string} sub - subcomando de /config que lo fija (y su valor en /config reset)
+ * @property {'role' | 'channel' | 'text' | 'language'} kind
  * @property {boolean} required
  * @property {string[]} blocks
- * @property {string | null} impact
- * @property {string} missing - frase para "este servidor no tiene..."
  */
 
 /** @type {ConfigField[]} */
 export const CONFIG_FIELDS = [
-  {
-    key: 'officerRoleId',
-    sub: 'oficial',
-    label: 'Rol de oficiales',
-    kind: 'role',
-    required: true,
-    blocks: ['/squads', '/sorteo', '/crear-rol', '/health'],
-    impact: null,
-    missing: 'Este servidor no tiene rol de oficiales configurado.',
-  },
-  {
-    key: 'logChannelId',
-    sub: 'logs',
-    label: 'Canal de logs',
-    kind: 'channel',
-    required: true,
-    blocks: [],
-    impact: 'Los cambios (/squads, /config, /crear-rol, /dm) y los errores no quedan registrados en ningún sitio.',
-    missing: 'Este servidor no tiene canal de logs configurado.',
-  },
-  {
-    key: 'raffleRoleId',
-    sub: 'sorteo-rol',
-    label: 'Rol a avisar en sorteos',
-    kind: 'role',
-    required: false,
-    blocks: [],
-    impact: '/sorteo funciona, pero no menciona a ningún rol al anunciarse.',
-    missing: 'Este servidor no tiene rol de sorteos configurado.',
-  },
-  {
-    key: 'dmOptoutRoleId',
-    sub: 'dm-optout',
-    label: 'Rol que no recibe /dm',
-    kind: 'role',
-    required: false,
-    blocks: [],
-    impact: '/dm funciona, pero nadie puede excluirse de recibirlos.',
-    missing: 'Este servidor no tiene rol de exclusión de /dm configurado.',
-  },
-  {
-    key: 'albionServer',
-    sub: 'servidor',
-    label: 'Servidor de Albion',
-    kind: 'text',
-    required: true,
-    blocks: [],
-    impact: null,
-    missing: 'Este servidor no tiene servidor de Albion configurado.',
-  },
-  {
-    key: 'albionGuild',
-    sub: 'gremio',
-    label: 'Gremio de Albion',
-    kind: 'text',
-    required: true,
-    blocks: ['/getkills'],
-    impact: null,
-    missing: 'Este servidor no tiene gremio de Albion configurado.',
-  },
-  {
-    key: 'albionbbGuildId',
-    sub: 'albionbb',
-    label: 'Id del gremio en albionbb',
-    kind: 'text',
-    required: true,
-    blocks: ['/attendance'],
-    impact: null,
-    missing: 'Este servidor no tiene configurado el id de su gremio en albionbb.',
-  },
+  { key: 'officerRoleId', sub: 'officer', kind: 'role', required: true, blocks: ['squads', 'raffle', 'createRole', 'health'] },
+  { key: 'logChannelId', sub: 'logs', kind: 'channel', required: true, blocks: [] },
+  { key: 'raffleRoleId', sub: 'raffle-role', kind: 'role', required: false, blocks: [] },
+  { key: 'dmOptoutRoleId', sub: 'dm-optout', kind: 'role', required: false, blocks: [] },
+  { key: 'albionServer', sub: 'server', kind: 'text', required: true, blocks: [] },
+  { key: 'albionGuild', sub: 'guild', kind: 'text', required: true, blocks: ['getkills'] },
+  { key: 'albionbbGuildId', sub: 'albionbb', kind: 'text', required: true, blocks: ['attendance'] },
+  { key: 'idioma', sub: 'language', kind: 'language', required: false, blocks: [] },
 ];
 
 const FIELDS_BY_KEY = new Map(CONFIG_FIELDS.map((field) => [field.key, field]));
@@ -111,9 +48,29 @@ export function fieldBySub(sub) {
 }
 
 /**
+ * Nombre del campo para mostrar.
+ * @param {ConfigField} field
+ * @param {string} lang
+ */
+export function fieldLabel(field, lang) {
+  return t(`config.field.${field.key}.label`, lang);
+}
+
+/**
+ * Qué deja de funcionar mientras falte el campo, con los comandos escritos
+ * como los teclea quien lee ("/sorteo" en español, "/raffle" en inglés).
+ * @param {ConfigField} field
+ * @param {string} lang
+ */
+export function fieldGap(field, lang) {
+  const commands = field.blocks.map((command) => commandName(command, lang)).join(', ');
+  return t(`config.field.${field.key}.gap`, lang, { commands });
+}
+
+/**
  * ¿Tiene el servidor todos los campos obligatorios? No mira si un rol o canal
  * configurado sigue existiendo (eso necesita el servidor de Discord a mano;
- * lo hace /config ver).
+ * lo hace /config view).
  * @param {object} config
  */
 export function isConfigComplete(config) {
@@ -123,10 +80,10 @@ export function isConfigComplete(config) {
 /**
  * "Este servidor no tiene X. Un administrador puede ponerlo con /config y."
  * @param {string} key
+ * @param {string} lang
  */
-export function missingConfigMessage(key) {
-  const field = fieldByKey(key);
-  return `${field.missing} Un administrador puede ponerlo con \`/config ${field.sub}\`.`;
+export function missingConfigMessage(key, lang) {
+  return t(`config.field.${fieldByKey(key).key}.missing`, lang);
 }
 
 /**
@@ -134,12 +91,12 @@ export function missingConfigMessage(key) {
  * un campo. No es un fallo del bot: el mensaje dice qué falta y con qué
  * comando se arregla, y lo ve quien lo ejecutó (no solo los oficiales).
  */
-export class MissingConfigError extends Error {
-  /** @param {string} key */
-  constructor(key) {
-    super(missingConfigMessage(key));
+export class MissingConfigError extends LocalizedError {
+  /** @param {string} field - campo de config.json que falta */
+  constructor(field) {
+    super(`config.field.${fieldByKey(field).key}.missing`);
     this.name = 'MissingConfigError';
-    this.key = key;
+    this.field = field;
   }
 }
 

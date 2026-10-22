@@ -44,11 +44,16 @@ function makeChannel(id, { writable = true, rawPosition = 0, type = ChannelType.
   };
 }
 
-function makeGuild(id, { name = `Servidor ${id}`, systemChannel = null, channels = [], available = true } = {}) {
+// Por defecto, un servidor de Discord en español.
+function makeGuild(
+  id,
+  { name = `Servidor ${id}`, systemChannel = null, channels = [], available = true, preferredLocale = 'es-ES' } = {},
+) {
   let left = false;
   return {
     id,
     name,
+    preferredLocale,
     available,
     systemChannel,
     channels: { cache: new Map(channels.map((channel) => [channel.id, channel])) },
@@ -107,7 +112,41 @@ test('guildCreate: servidor nuevo -> config.json por defecto, sin squads, y bien
   assert.equal(system._sent.length, 1);
   const lines = system._sent[0].split('\n');
   assert.equal(lines.length, 3);
-  assert.match(system._sent[0], /administrador[\s\S]*`\/config ver`/);
+  assert.match(system._sent[0], /administrador[\s\S]*`\/config view`/);
+});
+
+test('un servidor nuevo creado en un Discord en español arranca con idioma "es"; en otro idioma, "en"', async () => {
+  for (const [preferredLocale, expected] of [
+    ['es-ES', 'es'],
+    ['es-419', 'es'],
+    ['en-US', 'en'],
+    ['de', 'en'],
+  ]) {
+    const guildId = newGuildId();
+    const system = makeChannel('sys');
+    await onGuildPresent(makeGuild(guildId, { systemChannel: system, preferredLocale }), { allowed: null });
+    assert.equal((await getConfig(guildId)).idioma, expected, preferredLocale);
+    // La bienvenida ya sale en ese idioma.
+    assert.match(system._sent[0], expected === 'es' ? /Todavía no estoy configurado/ : /not set up/, preferredLocale);
+  }
+});
+
+test('al arrancar, un servidor que ya existía sin idioma (config de antes) toma el de su Discord', async () => {
+  const guildId = newGuildId();
+  await setConfig(guildId, { albionGuild: 'FOAB' }); // existe, sin idioma
+  assert.equal((await getConfig(guildId)).idioma, null);
+
+  const guild = makeGuild(guildId, { systemChannel: makeChannel('sys'), preferredLocale: 'es-ES' });
+  assert.equal(await onGuildPresent(guild, { allowed: null }), 'active');
+  assert.equal((await getConfig(guildId)).idioma, 'es');
+  assert.equal(guild.systemChannel._sent.length, 0, 'un servidor que ya existía no recibe bienvenida');
+});
+
+test('un idioma elegido con /config language no se pisa al arrancar aunque el Discord esté en otro', async () => {
+  const guildId = newGuildId();
+  await setConfig(guildId, { idioma: 'en' });
+  await onGuildPresent(makeGuild(guildId, { preferredLocale: 'es-ES' }), { allowed: null });
+  assert.equal((await getConfig(guildId)).idioma, 'en');
 });
 
 test('bienvenida: sin canal de sistema escribible, el primer canal de texto donde pueda escribir', () => {
@@ -198,6 +237,7 @@ test('reconcileGuilds: un servidor ya activo no recibe otra bienvenida en cada a
 function makeDmInteraction({ autocomplete = false } = {}) {
   const calls = [];
   return {
+    locale: 'es-ES',
     inGuild: () => false,
     isAutocomplete: () => autocomplete,
     isRepliable: () => !autocomplete,

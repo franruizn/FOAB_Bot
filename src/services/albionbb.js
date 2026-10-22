@@ -1,3 +1,5 @@
+import { LocalizedError } from '../i18n.js';
+
 const HOST_TO_SERVER = {
   'albionbb.com': 'americas',
   'europe.albionbb.com': 'europe',
@@ -12,9 +14,14 @@ function isDigitsOnly(value) {
   return true;
 }
 
-export class InvalidLinkError extends Error {
-  constructor(message) {
-    super(message);
+/** El enlace de albionbb no vale. El texto sale de src/i18n.js (link.*). */
+export class InvalidLinkError extends LocalizedError {
+  /**
+   * @param {string} key
+   * @param {Record<string, string | number>} [values]
+   */
+  constructor(key, values) {
+    super(key, values);
     this.name = 'InvalidLinkError';
   }
 }
@@ -33,24 +40,24 @@ export function parseAlbionbbUrl(url) {
   try {
     parsed = new URL(url);
   } catch {
-    throw new InvalidLinkError(`"${url}" no es una URL válida`);
+    throw new InvalidLinkError('link.notUrl', { url });
   }
 
   const server = HOST_TO_SERVER[parsed.hostname];
   if (!server) {
-    throw new InvalidLinkError(`"${parsed.hostname}" no es un host de albionbb reconocido`);
+    throw new InvalidLinkError('link.unknownHost', { host: parsed.hostname });
   }
 
   const segments = parsed.pathname.split('/').filter(Boolean);
   if (segments.length !== 2 || segments[0] !== 'battles') {
-    throw new InvalidLinkError(`La ruta "${parsed.pathname}" no tiene el formato /battles/<id> ni /battles/multi?ids=<id>,...`);
+    throw new InvalidLinkError('link.badPath', { path: parsed.pathname });
   }
 
   let rawIds;
   if (segments[1] === 'multi') {
     const idsParam = parsed.searchParams.get('ids');
     if (!idsParam) {
-      throw new InvalidLinkError(`"${url}" es /battles/multi pero le falta el parámetro "ids"`);
+      throw new InvalidLinkError('link.multiNoIds', { url });
     }
     rawIds = idsParam.split(',');
   } else {
@@ -59,7 +66,7 @@ export function parseAlbionbbUrl(url) {
 
   const battleIds = rawIds.map((rawId) => {
     if (!isDigitsOnly(rawId)) {
-      throw new InvalidLinkError(`El id de batalla "${rawId}" no es numérico`);
+      throw new InvalidLinkError('link.notNumeric', { id: rawId });
     }
     return Number(rawId);
   });

@@ -1,19 +1,20 @@
 import { EmbedBuilder } from 'discord.js';
+import { t } from '../i18n.js';
 
 const SUCCESS_COLOR = 0x00ff9d;
 const INFO_COLOR = 0x5865f2;
 
 /**
  * Embed de una mutación exitosa: qué cambió y quién lo hizo.
- * @param {{ title: string, description: string, actorTag: string }} params
+ * @param {{ title: string, description: string, actorTag: string, lang: string }} params
  * @returns {EmbedBuilder}
  */
-export function mutationEmbed({ title, description, actorTag }) {
+export function mutationEmbed({ title, description, actorTag, lang }) {
   return new EmbedBuilder()
     .setColor(SUCCESS_COLOR)
     .setTitle(title)
     .setDescription(description)
-    .setFooter({ text: `Editado por ${actorTag}` })
+    .setFooter({ text: t('common.editedBy', lang, { tag: actorTag }) })
     .setTimestamp(new Date());
 }
 

@@ -9,11 +9,20 @@ process.env.DATA_DIR = DATA_DIR;
 
 const { resolveRaffle, scheduleRaffleResolution, initializeRaffles } = await import('./raffleScheduler.js');
 const { loadRaffles, addRaffle } = await import('./services/rafflesStore.js');
+const { setConfig } = await import('./services/guildStore.js');
 // Servidor por defecto de los sorteos sin rol (los de rol traen el suyo).
 const DEFAULT_GUILD_ID = '100000000000000001';
 
 after(async () => {
   await rm(DATA_DIR, { recursive: true, force: true });
+});
+
+// Los resultados de un sorteo son públicos: salen en el idioma del servidor.
+// Todos los servidores de este fichero están en español.
+before(async () => {
+  for (const guildId of [DEFAULT_GUILD_ID, '200000000000000001', '200000000000000002', '200000000000000003', '200000000000000004', '200000000000000005', '200000000000000006']) {
+    await setConfig(guildId, { idioma: 'es' });
+  }
 });
 
 function wait(ms) {
@@ -374,7 +383,7 @@ test('resolveRaffle(): con rol, si nadie de los que reaccionaron lo tiene, lo di
 
   const payload = channel.sentPayloads.at(-1);
   assert.equal(payload.content, undefined, 'sin ganador no hay texto plano con menciones');
-  assert.match(payload.embeds[0].toJSON().description, /2 persona\(s\) reaccionaron, pero ninguna cumplía el rol requerido/);
+  assert.match(payload.embeds[0].toJSON().description, /2 personas reaccionaron, pero ninguna tenía el rol requerido/);
 });
 
 test('resolveRaffle(): si el rol se borró antes de resolver, resuelve sin participantes y lo explica sin reventar', async () => {

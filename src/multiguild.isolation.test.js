@@ -68,8 +68,9 @@ before(async () => {
     return { ok: true, status: 200, json: async () => structuredClone(body) };
   };
 
-  await setConfig(A, { officerRoleId: OFFICER_A, albionGuild: 'GuildA' });
-  await setConfig(B, { officerRoleId: OFFICER_B, albionGuild: 'GuildB' });
+  // Los dos servidores en español: lo público sale en español.
+  await setConfig(A, { officerRoleId: OFFICER_A, albionGuild: 'GuildA', idioma: 'es' });
+  await setConfig(B, { officerRoleId: OFFICER_B, albionGuild: 'GuildB', idioma: 'es' });
   await createSquad(A, 'alpha');
   await addPlayers(A, 'alpha', 'PlayerA1');
   await createSquad(B, 'bravo');
@@ -82,12 +83,13 @@ after(async () => {
 
 // --- interacción falsa ---
 
-function makeInteraction({ guildId, roles = [], subcommand = null, options = {} }) {
+function makeInteraction({ guildId, roles = [], subcommand = null, options = {}, locale = 'es-ES' }) {
   const replies = [];
   const edits = [];
   const channelSends = [];
   return {
     guildId,
+    locale,
     channelId: `canal-${guildId}`,
     guild: { id: guildId, roles: { cache: new Map([[OFFICER_A, {}], [OFFICER_B, {}]]) } },
     member: { roles: { cache: new Map(roles.map((role) => [role, true])) } },
@@ -144,7 +146,7 @@ test('añadir un jugador en A no aparece en B', async () => {
   const before = await readFile(rutaDe(B, 'squads.json'), 'utf8');
 
   await squads(
-    makeInteraction({ guildId: A, roles: [OFFICER_A], subcommand: 'add', options: { squad: 'alpha', jugadores: 'SoloEnA' } }),
+    makeInteraction({ guildId: A, roles: [OFFICER_A], subcommand: 'add', options: { squad: 'alpha', players: 'SoloEnA' } }),
   );
 
   assert.ok((await loadConfig(A)).playerToSquad.has('soloena'));
@@ -157,7 +159,7 @@ test('un oficial de A sin el rol de B no puede mutar nada en B', async () => {
 
   for (const [subcommand, options] of [
     ['create', { name: 'intruso' }],
-    ['add', { squad: 'bravo', jugadores: 'Intruso' }],
+    ['add', { squad: 'bravo', players: 'Intruso' }],
     ['delete', { squad: 'bravo' }],
   ]) {
     const interaction = makeInteraction({ guildId: B, roles: [OFFICER_A], subcommand, options });
@@ -212,8 +214,8 @@ test('dos sorteos simultáneos, uno en cada servidor: cada uno en su fichero y s
   // Sin esto los dos temporizadores reales de 30 minutos mantendrían vivo el proceso.
   mock.timers.enable({ apis: ['setTimeout'] });
   t.after(() => mock.timers.reset());
-  const inA = makeInteraction({ guildId: A, roles: [OFFICER_A], options: { minutos: 30 } });
-  const inB = makeInteraction({ guildId: B, roles: [OFFICER_B], options: { minutos: 30 } });
+  const inA = makeInteraction({ guildId: A, roles: [OFFICER_A], options: { minutes: 30 } });
+  const inB = makeInteraction({ guildId: B, roles: [OFFICER_B], options: { minutes: 30 } });
   await Promise.all([sorteo(inA), sorteo(inB)]);
 
   const [rafflesA, rafflesB] = [await loadRaffles(A), await loadRaffles(B)];
@@ -290,7 +292,7 @@ test('el autocompletado de /squads (remove, find) ofrece los nombres con su casi
       guild: { roles: { cache: new Map([[OFFICER_A, {}]]) } },
       member: { roles: { cache: new Map([[OFFICER_A, true]]) } },
       options: {
-        getFocused: () => ({ name: 'jugador', value: 'playera' }),
+        getFocused: () => ({ name: 'player', value: 'playera' }),
         getSubcommand: () => subcommand,
         getString: () => 'alpha',
       },
@@ -305,7 +307,52 @@ test('el autocompletado de /squads (remove, find) ofrece los nombres con su casi
 });
 
 test('/squads find responde con el nombre tal cual está en squads.json', async () => {
-  const find = makeInteraction({ guildId: A, roles: [OFFICER_A], subcommand: 'find', options: { jugador: 'PLAYERA1' } });
+  const find = makeInteraction({ guildId: A, roles: [OFFICER_A], subcommand: 'find', options: { player: 'PLAYERA1' } });
   await squads(find);
   assert.match(find._edits[0].content, /\*\*PlayerA1\*\* está en el squad \*\*ALPHA\*\*/);
+});
+
+// --- idioma: público en el del servidor, efímero en el de quien lo provoca ---
+
+test('un embed público sale en el idioma del servidor, no en el de quien lo ejecutó', async () => {
+  // Usuario con el cliente en inglés en un servidor configurado en español.
+  const inA = makeInteraction({ guildId: A, options: { url: BATTLE_URL }, locale: 'en-US' });
+  await getkills(inA);
+  const result = text(inA._edits[0]);
+  assert.match(result, /Batallas procesadas: 1\/1/);
+  assert.doesNotMatch(result, /Battles processed/);
+});
+
+test('una respuesta efímera sale en el idioma de quien la provocó, y el público del mismo comando en el del servidor', async () => {
+  // /squads add es efímero: inglés para quien lo pide aunque el servidor esté en español.
+  const add = makeInteraction({
+    guildId: A,
+    roles: [OFFICER_A],
+    subcommand: 'add',
+    options: { squad: 'alpha', players: 'IdiomaTest' },
+    locale: 'en-US',
+  });
+  await squads(add);
+  const reply = add._edits[0].embeds[0].toJSON();
+  assert.equal(reply.title, 'Squad "ALPHA" updated');
+  assert.equal(reply.description, 'Added: IdiomaTest');
+  assert.equal(reply.footer.text, 'Edited by Oficial#0001');
+
+  // /squads list es público: español, aunque lo pida la misma persona.
+  const list = makeInteraction({ guildId: A, roles: [OFFICER_A], subcommand: 'list', locale: 'en-US' });
+  await squads(list);
+  assert.match(text(list._edits[0]), /Squads de jugadores/);
+});
+
+test('/config language cambia el idioma de los mensajes públicos', async () => {
+  const guildId = '800000000000000009';
+  await setConfig(guildId, { albionGuild: 'GuildA', idioma: 'es' });
+  const before = makeInteraction({ guildId, options: { url: BATTLE_URL } });
+  await getkills(before);
+  assert.match(text(before._edits[0]), /Batallas procesadas/);
+
+  await setConfig(guildId, { idioma: 'en' }); // lo mismo que guarda /config language en
+  const after = makeInteraction({ guildId, options: { url: BATTLE_URL } });
+  await getkills(after);
+  assert.match(text(after._edits[0]), /Battles processed/);
 });

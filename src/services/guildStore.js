@@ -14,6 +14,8 @@ import { withFileLock, readJsonFile, atomicWriteJson } from './fileStore.js';
 export const GUILDS_DIR_NAME = 'guilds';
 export const CONFIG_VERSION = 1;
 export const ALBION_SERVERS = new Set(['europe', 'americas', 'asia']);
+// Idiomas de los mensajes públicos del bot en un servidor (ver src/i18n.js).
+export const LANGUAGES = new Set(['en', 'es']);
 
 const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 // Solo nombres planos ("squads.json", "backups"): nada de separadores ni "..".
@@ -31,6 +33,7 @@ const EDITABLE_KEYS = new Set([
   'albionServer',
   'albionGuild',
   'albionbbGuildId',
+  'idioma',
   'configuradoEn',
   'configuradoPor',
 ]);
@@ -61,6 +64,9 @@ export function defaultConfig(guildId) {
     albionServer: 'europe',
     albionGuild: null,
     albionbbGuildId: null,
+    // Idioma de los mensajes públicos. null hasta que se fija: al entrar en el
+    // servidor sale de su preferredLocale (ver guildLifecycle.js).
+    idioma: null,
     configuradoEn: null,
     configuradoPor: null,
   };
@@ -177,6 +183,10 @@ function validateChanges(cambios) {
     } else if (key === 'albionServer') {
       if (!ALBION_SERVERS.has(value)) {
         throw new GuildConfigError(`"albionServer" debe ser uno de: ${[...ALBION_SERVERS].join(', ')}.`);
+      }
+    } else if (key === 'idioma') {
+      if (value !== null && !LANGUAGES.has(value)) {
+        throw new GuildConfigError(`"idioma" debe ser uno de: ${[...LANGUAGES].join(', ')}, o null.`);
       }
     } else if (value !== null && typeof value !== 'string') {
       throw new GuildConfigError(`"${key}" debe ser un texto o null.`);

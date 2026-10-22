@@ -1,4 +1,5 @@
 import { EmbedBuilder, escapeMarkdown } from 'discord.js';
+import { t, tn } from '../i18n.js';
 
 const EMBED_COLOR = 0x00ff9d;
 const NOT_FOUND_COLOR = 0xf59e0b;
@@ -6,17 +7,11 @@ const NOT_FOUND_COLOR = 0xf59e0b;
 // Subdominio de albionbb por servidor: americas no lleva subdominio.
 const SERVER_SUBDOMAIN = { europe: 'europe.', americas: '', asia: 'east.' };
 
-// Mismas claves que produce services/albionbbApi.js al mapear "roles". Ver
-// docs/albionbb-api.md: la identificación de cada rol es por forma de icono,
-// no una etiqueta de texto confirmada.
-const ROLE_DISPLAY_LABELS = {
-  tank: 'Tank',
-  support: 'Support',
-  healer: 'Healer',
-  meleeDps: 'DPS melee',
-  rangedDps: 'DPS a distancia',
-  mounted: 'Montado',
-};
+// Mismas claves que produce services/albionbbApi.js al mapear "roles"; el
+// texto está en src/i18n.js (attendance.role.*). Ver docs/albionbb-api.md:
+// la identificación de cada rol es por forma de icono, no una etiqueta de
+// texto confirmada.
+const ROLE_KEYS = new Set(['tank', 'support', 'healer', 'meleeDps', 'rangedDps', 'mounted']);
 
 function formatCompactNumber(value) {
   const abs = Math.abs(value);
@@ -35,16 +30,19 @@ function relativeTimestamp(date) {
   return `<t:${Math.floor(date.getTime() / 1000)}:R>`;
 }
 
-function buildRolesFieldValue(roles) {
+function buildRolesFieldValue(roles, lang) {
   const entries = Object.entries(roles ?? {})
     .filter(([, count]) => count > 0)
     .sort((a, b) => b[1] - a[1]);
   if (entries.length === 0) return null;
-  return entries.map(([key, count]) => `${ROLE_DISPLAY_LABELS[key] ?? key}: **${count}**`).join(' · ');
+  return entries
+    .map(([key, count]) => `${ROLE_KEYS.has(key) ? t(`attendance.role.${key}`, lang) : key}: **${count}**`)
+    .join(' · ');
 }
 
 /**
- * Construye el embed principal de /attendance.
+ * Construye el embed principal de /attendance. Es público: va en el idioma
+ * del servidor.
  * @param {object} params
  * @param {object} params.player - entrada devuelta por albionbbApi.getGuildAttendance
  * @param {number} params.rank - posición 1-based en el ranking de attendance del gremio
@@ -52,44 +50,57 @@ function buildRolesFieldValue(roles) {
  * @param {'europe'|'americas'|'asia'} params.server
  * @param {string|null} params.squadDisplay - clave de squad en MAYÚSCULA, o null si no tiene
  * @param {{ start: string, end: string }} params.dateRange
+ * @param {string} params.lang
  * @returns {EmbedBuilder}
  */
-export function buildAttendanceEmbed({ player, rank, total, server, squadDisplay, dateRange }) {
-  const titleSuffix = squadDisplay ? ` [${squadDisplay}]` : '';
+export function buildAttendanceEmbed({ player, rank, total, server, squadDisplay, dateRange, lang }) {
   const subdomain = SERVER_SUBDOMAIN[server] ?? '';
+  const name = escapeMarkdown(player.name);
 
   const embed = new EmbedBuilder()
-    .setTitle(`📊 Attendance — ${escapeMarkdown(player.name)}${titleSuffix}`)
+    .setTitle(
+      squadDisplay
+        ? t('attendance.titleWithSquad', lang, { player: name, squad: squadDisplay })
+        : t('attendance.title', lang, { player: name }),
+    )
     .setURL(`https://${subdomain}albionbb.com/players/${encodeURIComponent(player.name)}`)
     .setColor(EMBED_COLOR)
     .addFields(
-      { name: 'Attendance', value: `**${player.attendance}** batallas\n#${rank} de ${total}`, inline: true },
       {
-        name: 'K / D',
-        value: `${player.kills} / ${player.deaths}\nRatio: **${formatRatio(player.kills, player.deaths)}**`,
+        name: t('attendance.field.attendance', lang),
+        value: tn('attendance.value.battles', player.attendance, lang, { rank, total }),
         inline: true,
       },
-      { name: 'Avg IP', value: `${Math.round(player.avgIp)}`, inline: true },
-      { name: 'Damage', value: formatCompactNumber(player.damage), inline: true },
-      { name: 'Healing', value: formatCompactNumber(player.heal), inline: true },
-      { name: 'Kill fame', value: formatCompactNumber(player.killFame), inline: true },
-      { name: 'Last battle', value: relativeTimestamp(player.lastBattle), inline: true },
+      {
+        name: t('attendance.field.kd', lang),
+        value: t('attendance.value.kd', lang, {
+          kills: player.kills,
+          deaths: player.deaths,
+          ratio: formatRatio(player.kills, player.deaths),
+        }),
+        inline: true,
+      },
+      { name: t('attendance.field.avgIp', lang), value: `${Math.round(player.avgIp)}`, inline: true },
+      { name: t('attendance.field.damage', lang), value: formatCompactNumber(player.damage), inline: true },
+      { name: t('attendance.field.healing', lang), value: formatCompactNumber(player.heal), inline: true },
+      { name: t('attendance.field.killFame', lang), value: formatCompactNumber(player.killFame), inline: true },
+      { name: t('attendance.field.lastBattle', lang), value: relativeTimestamp(player.lastBattle), inline: true },
     );
 
-  const rolesValue = buildRolesFieldValue(player.roles);
+  const rolesValue = buildRolesFieldValue(player.roles, lang);
   if (rolesValue) {
-    embed.addFields({ name: 'Roles', value: rolesValue, inline: false });
+    embed.addFields({ name: t('attendance.field.roles', lang), value: rolesValue, inline: false });
   }
 
   if (!squadDisplay) {
     embed.addFields({
-      name: '⚠️ Sin squad asignado',
-      value: 'Este jugador aparece en la attendance del gremio pero no está en ningún squad de squads.json.',
+      name: t('attendance.noSquad.name', lang),
+      value: t('attendance.noSquad.value', lang),
       inline: false,
     });
   }
 
-  embed.setFooter({ text: `Datos de albionbb · rango ${dateRange.start} → ${dateRange.end}` });
+  embed.setFooter({ text: t('attendance.footer', lang, { start: dateRange.start, end: dateRange.end }) });
 
   return embed;
 }
@@ -97,15 +108,21 @@ export function buildAttendanceEmbed({ player, rank, total, server, squadDisplay
 /**
  * Embed de "jugador no encontrado" con sugerencias por distancia de
  * Levenshtein. No es un error: es un resultado esperado de una búsqueda.
- * @param {{ playerInput: string, suggestions: string[] }} params
+ * @param {{ playerInput: string, suggestions: string[], lang: string }} params
  * @returns {EmbedBuilder}
  */
-export function buildPlayerNotFoundEmbed({ playerInput, suggestions }) {
-  const base = `No encontré a **${escapeMarkdown(playerInput)}** en la attendance del gremio para este rango de fechas.`;
+export function buildPlayerNotFoundEmbed({ playerInput, suggestions, lang }) {
+  const player = escapeMarkdown(playerInput);
   const description =
     suggestions.length > 0
-      ? `${base}\n\n¿Quisiste decir…?\n${suggestions.map((name) => `• ${escapeMarkdown(name)}`).join('\n')}`
-      : base;
+      ? t('attendance.notFound.suggestions', lang, {
+          player,
+          suggestions: suggestions.map((name) => `• ${escapeMarkdown(name)}`).join('\n'),
+        })
+      : t('attendance.notFound.body', lang, { player });
 
-  return new EmbedBuilder().setColor(NOT_FOUND_COLOR).setTitle('Jugador no encontrado').setDescription(description);
+  return new EmbedBuilder()
+    .setColor(NOT_FOUND_COLOR)
+    .setTitle(t('attendance.notFound.title', lang))
+    .setDescription(description);
 }

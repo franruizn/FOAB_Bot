@@ -69,7 +69,8 @@ test('formato: members de un squad de gremio se ignora, con aviso', () => {
   const config = normalizeConfig({ squads: { Dementia: { isGuild: true, members: ['alguien'] } } }, 'x');
   assert.equal(config.squads.get('dementia').members.size, 0);
   assert.equal(config.playerToSquad.size, 0);
-  assert.match(config.warnings[0], /se ignoran/);
+  assert.deepEqual(config.notices, [{ key: 'configFile.warning.guildMembers.one', values: { squad: 'Dementia', count: 1 } }]);
+  assert.match(config.warnings[0], /ignored/, 'el aviso del log va en inglés');
 });
 
 // --- migración del formato viejo ---
@@ -154,15 +155,15 @@ test('/squads add sobre un squad de gremio: rechazado explicando de dónde salen
   const guildId = await makeGuild(BASE);
   await assert.rejects(
     () => addPlayers(guildId, 'dementia', 'Alguien'),
-    (error) => error instanceof SquadCommandError && /salen del gremio/.test(error.message),
+    (error) => error instanceof SquadCommandError && error.key === 'squadsError.guildSquad.add' && /salen del gremio/.test(error.localized('es')),
   );
   assert.deepEqual(await readSquadsFile(guildId), BASE, 'no debe tocar el fichero');
 });
 
 test('/squads remove y move sobre un squad de gremio: también rechazados', async () => {
   const guildId = await makeGuild(BASE);
-  await assert.rejects(() => removePlayer(guildId, 'Dementia', 'Alguien'), /salen del gremio/);
-  await assert.rejects(() => movePlayer(guildId, 'Uno', 'DEMENTIA'), /salen del gremio/);
+  await assert.rejects(() => removePlayer(guildId, 'Dementia', 'Alguien'), (error) => error.key === 'squadsError.guildSquad.remove');
+  await assert.rejects(() => movePlayer(guildId, 'Uno', 'DEMENTIA'), (error) => error.key === 'squadsError.guildSquad.move');
   assert.deepEqual(await readSquadsFile(guildId), BASE);
 });
 
@@ -177,8 +178,8 @@ test('/squads create de gremio apuntando al gremio principal: rechazado (ya es M
 
 test('/squads create: rechaza un nombre que ya existe, sea del tipo que sea', async () => {
   const guildId = await makeGuild(BASE);
-  await assert.rejects(() => createSquad(guildId, 'RAF', { isGuild: true }), /Ya existe un squad de jugadores/);
-  await assert.rejects(() => createSquad(guildId, 'dementia'), /Ya existe un squad de gremio/);
+  await assert.rejects(() => createSquad(guildId, 'RAF', { isGuild: true }), (error) => error.key === 'squadsError.exists.players');
+  await assert.rejects(() => createSquad(guildId, 'dementia'), (error) => error.key === 'squadsError.exists.guild');
 });
 
 test('/squads create de gremio: guarda el nombre con su casing y espacios; uno de jugadores, vacío y sin isGuild', async () => {

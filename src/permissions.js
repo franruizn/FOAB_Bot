@@ -2,6 +2,7 @@ import { PermissionFlagsBits } from 'discord.js';
 import { getConfig } from './services/guildStore.js';
 import { missingConfigMessage } from './services/configFields.js';
 import { errorEmbed } from './ui/errorEmbed.js';
+import { t, userLang } from './i18n.js';
 
 /**
  * Comprueba en runtime si quien invocó la interacción tiene el rol de
@@ -29,23 +30,22 @@ export async function isOfficer(interaction) {
  * @returns {Promise<boolean>}
  */
 export async function ensureOfficer(interaction) {
-  const deny = (title, description) =>
-    interaction.reply({ embeds: [errorEmbed(title, description)], ephemeral: true }).then(() => false);
+  // Respuesta efímera: en el idioma de quien lo ejecutó.
+  const lang = userLang(interaction);
+  const deny = (titleKey, description) =>
+    interaction.reply({ embeds: [errorEmbed(t(titleKey, lang), description)], ephemeral: true }).then(() => false);
 
-  if (!interaction.guildId) return deny('Sin permiso', 'Este comando solo funciona dentro de un servidor.');
+  if (!interaction.guildId) return deny('common.serverOnly.title', t('common.serverOnly.body', lang));
 
   const { officerRoleId } = await getConfig(interaction.guildId);
-  if (!officerRoleId) return deny('Falta configuración', missingConfigMessage('officerRoleId'));
+  if (!officerRoleId) return deny('common.missingConfig.title', missingConfigMessage('officerRoleId', lang));
   // Solo si el servidor está en caché: sin él no se puede saber si el rol
   // sigue existiendo, y se cae al "Sin permiso" de siempre.
   if (interaction.guild?.roles?.cache && !interaction.guild.roles.cache.has(officerRoleId)) {
-    return deny(
-      'Falta configuración',
-      'El rol de oficiales configurado en este servidor ya no existe. Un administrador puede cambiarlo con `/config oficial`.',
-    );
+    return deny('common.missingConfig.title', t('common.officerRoleGone', lang));
   }
   if (!(interaction.member?.roles?.cache?.has(officerRoleId) ?? false)) {
-    return deny('Sin permiso', 'Este comando es solo para el rol de oficiales.');
+    return deny('common.noPermission.title', t('common.officerOnly', lang));
   }
   return true;
 }
@@ -76,9 +76,10 @@ export async function rejectOutsideGuild(interaction) {
   if (interaction.isAutocomplete()) {
     await interaction.respond([]).catch(() => {});
   } else if (interaction.isRepliable()) {
+    const lang = userLang(interaction);
     await interaction
       .reply({
-        embeds: [errorEmbed('Solo en servidores', 'Este comando solo funciona dentro de un servidor, no por mensaje directo.')],
+        embeds: [errorEmbed(t('common.serverOnly.title', lang), t('common.serverOnly.body', lang))],
         ephemeral: true,
       })
       .catch(() => {});

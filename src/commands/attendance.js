@@ -3,28 +3,27 @@ import { getGuildAttendance } from '../services/albionbbApi.js';
 import { loadConfig } from '../services/config.js';
 import { requireConfig } from '../services/configFields.js';
 import { buildAttendanceEmbed, buildPlayerNotFoundEmbed } from '../ui/attendanceEmbed.js';
+import { guildLang, localizedName, localizedDescription, localizedChoice } from '../i18n.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_DAYS = 30;
 const AUTOCOMPLETE_LIMIT = 25;
 const SUGGESTION_COUNT = 3;
 
-export const data = new SlashCommandBuilder()
-  .setName('attendance')
-  .setDescription('Consulta la asistencia a batallas de un jugador')
+export const data = localizedDescription(localizedName(new SlashCommandBuilder(), 'cmd.attendance.name'), 'cmd.attendance.description')
   .addStringOption((o) =>
-    o.setName('nombre').setDescription('Nombre del jugador').setRequired(true).setAutocomplete(true),
+    localizedDescription(localizedName(o, 'cmd.attendance.opt.player.name'), 'cmd.attendance.opt.player.description')
+      .setRequired(true)
+      .setAutocomplete(true),
   )
   .addIntegerOption((o) =>
-    o
-      .setName('dias')
-      .setDescription('Ventana de días a consultar (por defecto 30)')
-      .addChoices(
-        { name: '7 días', value: 7 },
-        { name: '14 días', value: 14 },
-        { name: '30 días', value: 30 },
-        { name: '90 días', value: 90 },
-      ),
+    localizedDescription(localizedName(o, 'cmd.attendance.opt.days.name'), 'cmd.attendance.opt.days.description').addChoices(
+      // Se traduce el nombre visible; el valor (los días) es lo que recibe el código.
+      localizedChoice('cmd.attendance.choice.days7', 7),
+      localizedChoice('cmd.attendance.choice.days14', 14),
+      localizedChoice('cmd.attendance.choice.days30', 30),
+      localizedChoice('cmd.attendance.choice.days90', 90),
+    ),
   );
 
 function formatDate(date) {
@@ -92,10 +91,12 @@ async function requireAlbionbbConfig(discordGuildId) {
  */
 export async function execute(interaction) {
   await interaction.deferReply();
+  // Respuesta pública: la lee el canal, va en el idioma del servidor.
+  const lang = await guildLang(interaction.guildId);
 
   const { albionbbGuildId, server } = await requireAlbionbbConfig(interaction.guildId);
-  const playerInput = interaction.options.getString('nombre', true).trim();
-  const days = interaction.options.getInteger('dias') ?? DEFAULT_DAYS;
+  const playerInput = interaction.options.getString('player', true).trim();
+  const days = interaction.options.getInteger('days') ?? DEFAULT_DAYS;
   const dateRange = resolveDateRange(days);
 
   const roster = await getGuildAttendance(server, albionbbGuildId, dateRange);
@@ -109,7 +110,7 @@ export async function execute(interaction) {
       playerInput,
       roster.map((entry) => entry.name),
     );
-    await interaction.editReply({ embeds: [buildPlayerNotFoundEmbed({ playerInput, suggestions })] });
+    await interaction.editReply({ embeds: [buildPlayerNotFoundEmbed({ playerInput, suggestions, lang })] });
     return;
   }
 
@@ -128,7 +129,7 @@ export async function execute(interaction) {
     console.error('No se pudo cargar squads.json para /attendance:', error);
   }
 
-  const embed = buildAttendanceEmbed({ player, rank, total, server, squadDisplay, dateRange });
+  const embed = buildAttendanceEmbed({ player, rank, total, server, squadDisplay, dateRange, lang });
   await interaction.editReply({ embeds: [embed] });
 }
 
@@ -137,7 +138,7 @@ export async function execute(interaction) {
  */
 export async function autocomplete(interaction) {
   const focused = interaction.options.getFocused(true);
-  if (focused.name !== 'nombre') {
+  if (focused.name !== 'player') {
     await interaction.respond([]);
     return;
   }

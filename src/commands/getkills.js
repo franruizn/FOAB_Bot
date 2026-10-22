@@ -5,15 +5,11 @@ import { loadConfig } from '../services/config.js';
 import { requireConfig } from '../services/configFields.js';
 import { aggregateBattle } from '../services/aggregate.js';
 import { buildKillsEmbed } from '../ui/killsEmbed.js';
+import { guildLang, localizedName, localizedDescription } from '../i18n.js';
 
-export const data = new SlashCommandBuilder()
-  .setName('getkills')
-  .setDescription('Muestra las kills y muertes del gremio y de cada squad en una batalla')
+export const data = localizedDescription(localizedName(new SlashCommandBuilder(), 'cmd.getkills.name'), 'cmd.getkills.description')
   .addStringOption((option) =>
-    option
-      .setName('url')
-      .setDescription('Enlace de albionbb a la batalla, ej. https://europe.albionbb.com/battles/418186013')
-      .setRequired(true),
+    localizedDescription(localizedName(option, 'cmd.getkills.opt.url.name'), 'cmd.getkills.opt.url.description').setRequired(true),
   );
 
 /**
@@ -76,7 +72,9 @@ export async function execute(interaction) {
   const result = aggregateBattle({ events, battles, config, mainGuild });
   for (const warning of result.warnings) console.warn(`[getkills] ${warning}`);
 
+  // Respuesta pública: la lee el canal, va en el idioma del servidor.
   const embeds = buildKillsEmbed({
+    lang: await guildLang(interaction.guildId),
     result,
     battlesProcessed: processed,
     battlesRequested: battleIds.length,

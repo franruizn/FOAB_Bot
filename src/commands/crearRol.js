@@ -5,6 +5,7 @@ import { buildCrearRolPreviewEmbed, buildCrearRolResultEmbed } from '../ui/crear
 import { resolveMentionList } from '../services/mentionList.js';
 import { verificarPrerequisitosDeRol, RolePrerequisiteError } from '../services/rolePrerequisites.js';
 import { notifyRoleCreation } from '../logChannel.js';
+import { t, tn, userLang, guildLang, localizedName, localizedDescription } from '../i18n.js';
 
 const CONFIRM_TIMEOUT_MS = 60_000;
 const ROLE_NAME_MAX_LENGTH = 100; // límite real de Discord para el nombre de un rol
@@ -14,18 +15,18 @@ function contieneMencionMasiva(texto) {
   return normalizado.includes('@everyone') || normalizado.includes('@here');
 }
 
+// /create-role en inglés, /crear-rol con el cliente en español: el mismo
+// comando.
+//
 // Visible para todos en el picker de Discord a propósito: el filtro real es
 // ensureOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
-export const data = new SlashCommandBuilder()
-  .setName('crear-rol')
-  .setDescription('Crea un rol y se lo asigna a una lista de personas (solo oficiales)')
-  .addStringOption((option) => option.setName('nombre').setDescription('Nombre del rol a crear').setRequired(true))
+export const data = localizedDescription(localizedName(new SlashCommandBuilder(), 'cmd.createRole.name'), 'cmd.createRole.description')
   .addStringOption((option) =>
-    option
-      .setName('lista')
-      .setDescription('@usuario o menciones, separados por espacios o comas')
-      .setRequired(true),
+    localizedDescription(localizedName(option, 'cmd.createRole.opt.name.name'), 'cmd.createRole.opt.name.description').setRequired(true),
+  )
+  .addStringOption((option) =>
+    localizedDescription(localizedName(option, 'cmd.createRole.opt.list.name'), 'cmd.createRole.opt.list.description').setRequired(true),
   );
 
 /**
@@ -33,17 +34,22 @@ export const data = new SlashCommandBuilder()
  */
 export async function execute(interaction) {
   if (!(await ensureOfficer(interaction))) return;
+  // Todas las respuestas son efímeras: idioma de quien lo ejecuta.
+  const lang = userLang(interaction);
 
-  const nombreInput = interaction.options.getString('nombre', true).trim();
-  const lista = interaction.options.getString('lista', true);
+  const nombreInput = interaction.options.getString('name', true).trim();
+  const lista = interaction.options.getString('list', true);
 
   if (nombreInput.length === 0) {
-    await interaction.reply({ embeds: [errorEmbed('Nombre inválido', 'El nombre del rol no puede estar vacío.')], ephemeral: true });
+    await interaction.reply({
+      embeds: [errorEmbed(t('createRole.error.nameEmpty.title', lang), t('createRole.error.nameEmpty.body', lang))],
+      ephemeral: true,
+    });
     return;
   }
   if (contieneMencionMasiva(nombreInput)) {
     await interaction.reply({
-      embeds: [errorEmbed('Nombre inválido', 'El nombre del rol no puede contener "@everyone" ni "@here".')],
+      embeds: [errorEmbed(t('createRole.error.massMention.title', lang), t('createRole.error.massMention.body', lang))],
       ephemeral: true,
     });
     return;
@@ -56,13 +62,13 @@ export async function execute(interaction) {
   // mejor rechazar que crear un duplicado.
   if (interaction.guild.roles.cache.some((role) => role.name === rolName)) {
     await interaction.reply({
-      embeds: [errorEmbed('El rol ya existe', `Ya hay un rol llamado "${rolName}" en este servidor. Elige otro nombre.`)],
+      embeds: [errorEmbed(t('createRole.error.exists.title', lang), t('createRole.error.exists.body', lang, { role: rolName }))],
       ephemeral: true,
     });
     return;
   }
 
-  await interaction.reply({ content: 'Resolviendo la lista...', ephemeral: true });
+  await interaction.reply({ content: t('createRole.resolving', lang), ephemeral: true });
 
   const members = await interaction.guild.members.fetch();
   const { resolved, unresolved } = resolveMentionList(lista, members);
@@ -72,9 +78,8 @@ export async function execute(interaction) {
       content: null,
       embeds: [
         errorEmbed(
-          'No se ha podido resolver a nadie',
-          `Ninguno de los ${unresolved.length} nombre(s) de la lista coincide con un miembro de este servidor:\n` +
-            unresolved.map((token) => `\`${token}\``).join(', '),
+          t('createRole.nobody.title', lang),
+          tn('createRole.nobody.body', unresolved.length, lang, { list: unresolved.map((token) => `\`${token}\``).join(', ') }),
         ),
       ],
     });
@@ -84,13 +89,13 @@ export async function execute(interaction) {
   const confirmId = `crear-rol-confirm-${interaction.id}`;
   const cancelId = `crear-rol-cancel-${interaction.id}`;
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(confirmId).setLabel('Confirmar').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(cancelId).setLabel('Cancelar').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(confirmId).setLabel(t('common.confirm', lang)).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(cancelId).setLabel(t('common.cancel', lang)).setStyle(ButtonStyle.Secondary),
   );
 
   const message = await interaction.editReply({
     content: null,
-    embeds: [buildCrearRolPreviewEmbed({ rolName, resolvedCount: resolved.length, unresolved })],
+    embeds: [buildCrearRolPreviewEmbed({ rolName, resolvedCount: resolved.length, unresolved, lang })],
     components: [row],
   });
 
@@ -101,12 +106,12 @@ export async function execute(interaction) {
       time: CONFIRM_TIMEOUT_MS,
     });
   } catch {
-    await interaction.editReply({ content: 'Confirmación expirada. No se creó ningún rol.', embeds: [], components: [] });
+    await interaction.editReply({ content: t('createRole.expired', lang), embeds: [], components: [] });
     return;
   }
 
   if (buttonInteraction.customId === cancelId) {
-    await buttonInteraction.update({ content: 'Creación cancelada.', embeds: [], components: [] });
+    await buttonInteraction.update({ content: t('createRole.cancelled', lang), embeds: [], components: [] });
     return;
   }
 
@@ -124,7 +129,7 @@ export async function execute(interaction) {
     if (error instanceof RolePrerequisiteError) {
       await buttonInteraction.editReply({
         content: null,
-        embeds: [errorEmbed('No se pudo crear el rol', error.message)],
+        embeds: [errorEmbed(t('createRole.failed.title', lang), error.localized(lang))],
         components: [],
       });
       return;
@@ -132,16 +137,15 @@ export async function execute(interaction) {
     throw error;
   }
 
-  const role = await interaction.guild.roles.create({
-    name: rolName,
-    mentionable: true,
-    reason: `/crear-rol por ${interaction.user.tag}`,
-  });
+  // El motivo queda en el registro de auditoría del servidor: lo leen sus
+  // administradores, así que va en el idioma del servidor.
+  const reason = t('createRole.auditReason', await guildLang(interaction.guildId), { tag: interaction.user.tag });
+  const role = await interaction.guild.roles.create({ name: rolName, mentionable: true, reason });
 
   const failedMentions = [];
   for (const member of resolved) {
     try {
-      await member.roles.add(role.id, `/crear-rol por ${interaction.user.tag}`);
+      await member.roles.add(role.id, reason);
     } catch (error) {
       console.error(`[crear-rol] No se pudo asignar el rol ${role.id} a ${member.id}:`, error?.stack ?? error);
       failedMentions.push(`<@${member.id}>`);
@@ -159,6 +163,7 @@ export async function execute(interaction) {
         totalResolved: resolved.length,
         unresolved,
         failedMentions,
+        lang,
       }),
     ],
     components: [],

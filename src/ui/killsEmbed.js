@@ -1,5 +1,6 @@
 import { EmbedBuilder, escapeMarkdown } from 'discord.js';
 import { truncateList } from './textTruncate.js';
+import { t, DEFAULT_LANGUAGE } from '../i18n.js';
 
 const EMBED_COLOR = 0x00ff9d;
 const FIELD_VALUE_MAX = 1024;
@@ -25,14 +26,19 @@ function formatPlayerLine(name, kills) {
  * los de 0 kills, que quedan al final), ordenados por kills desc y luego
  * alfabéticamente. El porcentaje es sobre el total de SU sección.
  */
-function buildBucketValue(bucket, totalKills) {
+function buildBucketValue(bucket, totalKills, lang) {
   if (bucket.players.length === 0) return EMPTY_FIELD_VALUE;
 
   const percent = totalKills > 0 ? (bucket.kills / totalKills) * 100 : 0;
-  const header = `**${bucket.kills}** (${percent.toFixed(1)}%)\nK-D: **${bucket.kills} - ${bucket.deaths}** Pax: ${bucket.players.length}`;
+  const header = t('kills.bucket.header', lang, {
+    kills: bucket.kills,
+    percent: percent.toFixed(1),
+    deaths: bucket.deaths,
+    pax: bucket.players.length,
+  });
 
   const topOnly = bucket.key === 'main' || bucket.isGuild;
-  const rosterTitle = topOnly ? 'Top killers' : 'Players';
+  const rosterTitle = t(topOnly ? 'kills.bucket.topKillers' : 'kills.bucket.players', lang);
   const sorted = [...bucket.players].sort(byKillsThenName);
   const roster = topOnly ? sorted.slice(0, MAIN_ZERG_TOP_N) : sorted;
 
@@ -40,7 +46,7 @@ function buildBucketValue(bucket, totalKills) {
   const prefix = `${header}\n\n__${rosterTitle}__\n`;
   const budget = Math.max(0, FIELD_VALUE_MAX - prefix.length);
 
-  return `${prefix}${truncateList(lines, budget)}`;
+  return `${prefix}${truncateList(lines, budget, { formatSuffix: (count) => t('common.more', lang, { count }) })}`;
 }
 
 function fieldLength(field) {
@@ -86,6 +92,9 @@ function packFieldsIntoChunks(fields, firstChunkBudget) {
  * divide en varios si el contenido supera los límites de Discord (25 fields /
  * 6000 caracteres por embed), hasta un máximo de 10 embeds por mensaje.
  *
+ * Los nombres de jugadores, de squads y de gremios no se traducen; MAIN
+ * ZERG, TOTAL, K-D y Pax son jerga del gremio y se quedan igual.
+ *
  * @param {object} params
  * @param {import('../services/aggregate.js').aggregateBattle extends (...args: any) => infer R ? R : never} params.result
  * @param {number} params.battlesProcessed
@@ -95,6 +104,7 @@ function packFieldsIntoChunks(fields, firstChunkBudget) {
  *   dejar un MAIN ZERG a solas que parece un fallo
  * @param {string} params.originalUrl
  * @param {Date} params.battleDate
+ * @param {string} [params.lang] - idioma del servidor: el embed es público
  * @returns {EmbedBuilder[]}
  */
 export function buildKillsEmbed({
@@ -105,6 +115,7 @@ export function buildKillsEmbed({
   hasSquads = true,
   originalUrl,
   battleDate,
+  lang = DEFAULT_LANGUAGE,
 }) {
   const { buckets, alliance, totals } = result;
   const guildBuckets = result.guildBuckets ?? [];
@@ -116,53 +127,53 @@ export function buildKillsEmbed({
   // Las dos secciones nunca se suman en silencio: el TOTAL es solo del gremio
   // principal, y el conjunto va en una línea aparte etiquetada como tal.
   const description = [
-    ...(hasSquads
-      ? []
-      : [
-          '⚠️ This server has no squads yet, so everyone counts as MAIN ZERG. ' +
-            'An officer can create them with `/squads create`.',
-          '',
-        ]),
-    `Battles processed: ${battlesProcessed}/${battlesRequested}`,
-    `Friendly alliance (detected): ${escapeMarkdown(alliance) || EMPTY_FIELD_VALUE}`,
-    `Unique counted players (${mainName}): ${totals.uniquePlayers}`,
-    ...(hasFollowed ? [`Unique counted players (followed guilds): ${followedTotals.uniquePlayers}`] : []),
-    `Unique counted enemies (not in friendly alliance${hasFollowed ? ' nor in a followed guild' : ''}): ${totals.uniqueEnemies}`,
+    ...(hasSquads ? [] : [t('kills.noSquads', lang), '']),
+    t('kills.battlesProcessed', lang, { processed: battlesProcessed, requested: battlesRequested }),
+    t('kills.alliance', lang, { alliance: escapeMarkdown(alliance) || EMPTY_FIELD_VALUE }),
+    t('kills.uniqueMain', lang, { guild: mainName, count: totals.uniquePlayers }),
+    ...(hasFollowed ? [t('kills.uniqueFollowed', lang, { count: followedTotals.uniquePlayers })] : []),
+    t(hasFollowed ? 'kills.uniqueEnemiesFollowed' : 'kills.uniqueEnemies', lang, { count: totals.uniqueEnemies }),
     '',
-    `**TOTAL ${mainName}**`,
-    `K-D: ${totals.kills} - ${totals.deaths}`,
+    t('kills.total', lang, { guild: mainName }),
+    t('kills.kd', lang, { kills: totals.kills, deaths: totals.deaths }),
     ...(hasFollowed
       ? [
           '',
-          '**FOLLOWED GUILDS (subtotal)**',
-          `K-D: ${followedTotals.kills} - ${followedTotals.deaths}`,
+          t('kills.followedHeader', lang),
+          t('kills.kd', lang, { kills: followedTotals.kills, deaths: followedTotals.deaths }),
           '',
-          `**COMBINED (${mainName} + followed guilds)**`,
-          `K-D: ${combinedTotals.kills} - ${combinedTotals.deaths} · Pax: ${combinedTotals.uniquePlayers}`,
+          t('kills.combinedHeader', lang, { guild: mainName }),
+          t('kills.combinedLine', lang, {
+            kills: combinedTotals.kills,
+            deaths: combinedTotals.deaths,
+            pax: combinedTotals.uniquePlayers,
+          }),
         ]
       : []),
   ].join('\n');
 
-  const title = '💥 Kills/Deaths per Bombsquads';
-  const footerText = hasFollowed
-    ? `TOTAL = MAIN ZERG + player squads (${mainGuildDisplay} only). Followed guilds are counted separately. ` +
-      'Enemies = players not in the detected friendly alliance nor in a followed guild.'
-    : `Only players in ${mainGuildDisplay} are counted. Enemies = players not in the detected friendly alliance.`;
+  const title = t('kills.title', lang);
+  const footerText = t(hasFollowed ? 'kills.footer.followed' : 'kills.footer.main', lang, { guild: mainGuildDisplay });
 
   const fields = buckets.map((bucket) => ({
     name: bucket.display,
-    value: buildBucketValue(bucket, totals.kills),
+    value: buildBucketValue(bucket, totals.kills, lang),
     inline: true,
   }));
 
   if (hasFollowed) {
     fields.push({
-      name: '🤝 Followed guilds',
-      value: `Not part of the ${mainName} total. Subtotal K-D: **${followedTotals.kills} - ${followedTotals.deaths}** Pax: ${followedTotals.uniquePlayers}`,
+      name: t('kills.followedField.name', lang),
+      value: t('kills.followedField.value', lang, {
+        guild: mainName,
+        kills: followedTotals.kills,
+        deaths: followedTotals.deaths,
+        pax: followedTotals.uniquePlayers,
+      }),
       inline: false,
     });
     for (const bucket of guildBuckets) {
-      fields.push({ name: `🛡️ ${bucket.display}`, value: buildBucketValue(bucket, followedTotals.kills), inline: true });
+      fields.push({ name: `🛡️ ${bucket.display}`, value: buildBucketValue(bucket, followedTotals.kills, lang), inline: true });
     }
   }
 

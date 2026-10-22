@@ -37,7 +37,7 @@ Se edita con `/config` (ver abajo), no a mano.
 
 ## Configurar un servidor: `/config`
 
-Lo primero al añadir el bot a un servidor es `/config ver`: enseña cada valor,
+Lo primero al añadir el bot a un servidor es `/config view`: enseña cada valor,
 marca los que faltan y dice qué comandos no funcionan todavía por ello.
 
 `/config` exige el permiso nativo de **Administrador** de Discord, no el rol de
@@ -48,16 +48,17 @@ El resto de comandos de gestión siguen usando el rol de oficiales.
 
 | Subcomando | Campo | Sin él |
 |---|---|---|
-| `/config oficial <rol>` | `officerRoleId` | `/squads`, `/sorteo`, `/crear-rol` y `/health` no funcionan |
-| `/config logs <canal>` | `logChannelId` | los cambios y errores no quedan registrados |
-| `/config sorteo-rol <rol>` | `raffleRoleId` | opcional: `/sorteo` no menciona a ningún rol |
-| `/config dm-optout <rol>` | `dmOptoutRoleId` | opcional: nadie puede excluirse de `/dm` |
-| `/config servidor <europe\|americas\|asia>` | `albionServer` | por defecto `europe` |
-| `/config gremio <nombre>` | `albionGuild` | `/getkills` no funciona |
-| `/config albionbb <id>` | `albionbbGuildId` | `/attendance` no funciona |
-| `/config reset <campo>` | — | vuelve el campo a su valor por defecto |
+| `/config officer role:<rol>` | `officerRoleId` | `/squads`, `/raffle`, `/create-role` y `/health` no funcionan |
+| `/config logs channel:<canal>` | `logChannelId` | los cambios y errores no quedan registrados |
+| `/config raffle-role role:<rol>` | `raffleRoleId` | opcional: `/raffle` no menciona a ningún rol |
+| `/config dm-optout role:<rol>` | `dmOptoutRoleId` | opcional: nadie puede excluirse de `/dm` |
+| `/config server value:<europe\|americas\|asia>` | `albionServer` | por defecto `europe` |
+| `/config guild name:<gremio>` | `albionGuild` | `/getkills` no funciona |
+| `/config albionbb value:<id>` | `albionbbGuildId` | `/attendance` no funciona |
+| `/config language value:<en\|es>` | `idioma` | por defecto, el idioma del servidor de Discord |
+| `/config reset field:<subcomando>` | — | vuelve el campo a su valor por defecto |
 
-- `/config gremio` acepta **un solo** gremio, el principal. Los demás se siguen
+- `/config guild` acepta **un solo** gremio, el principal. Los demás se siguen
   como squads de gremio: `/squads create name:<gremio> is-guild:true`.
 - Cada cambio se valida antes de guardarse: el canal de logs tiene que ser de
   texto y el bot tiene que poder escribir en él; el id de albionbb se comprueba
@@ -92,7 +93,9 @@ nada.
 - **Al añadir el bot a un servidor** se crea su carpeta con un `config.json`
   por defecto y se publica una bienvenida de tres líneas (en el canal de
   sistema, o en el primero donde pueda escribir) pidiendo a un administrador
-  que ejecute `/config ver`. Empieza **sin squads**: el semilla
+  que ejecute `/config view`, en el idioma del servidor de Discord
+  (`preferredLocale`: si está en español, el bot empieza en español). Empieza
+  **sin squads**: el semilla
   (`src/config/squads.seed.json`) es solo para `npm run smoke` y nunca se copia
   a un servidor.
 - **Al echarlo, no se borra nada**: su `config.json` pasa a `"activo": false`
@@ -106,6 +109,43 @@ nada.
 
 `/health` muestra en cuántos servidores está el bot y cuántos tienen la
 configuración completa.
+
+## Idiomas
+
+Los comandos son los mismos para todo el mundo, pero Discord los muestra con el
+nombre y la descripción del idioma del **cliente** de cada usuario
+(`setNameLocalizations` / `setDescriptionLocalizations`, con `es-ES` y
+`es-419`). No hay comandos duplicados: `/raffle` y `/sorteo` son el mismo.
+
+| Inglés (canónico) | Cliente en español |
+|---|---|
+| `/getkills` | `/getkills` |
+| `/attendance player days` | `/asistencia jugador dias` |
+| `/raffle minutes role` | `/sorteo minutos rol` |
+| `/create-role name list` | `/crear-rol nombre lista` |
+| `/health` | `/estado` |
+| `/dm role list` | `/dm rol lista` |
+| `/squads …` | `/squads …` (igual) |
+| `/config …` | `/config …` (igual) |
+
+`/squads` y `/config` son de administración: su nombre, sus subcomandos y sus
+opciones son **solo en inglés**, para que cualquier guía sirva a todos. Sus
+descripciones sí se traducen.
+
+Las **respuestas** del bot no pueden seguir siempre al cliente: un mensaje
+público es uno solo y lo lee todo el servidor.
+
+- **Efímeras** (confirmaciones, errores, previsualizaciones): en el idioma del
+  cliente de quien las provocó.
+- **Públicas** (el embed de `/getkills`, `/attendance`, el anuncio y el
+  resultado de un sorteo, el progreso de `/dm`, el canal de logs, la
+  bienvenida): en el idioma del servidor, `"idioma"` en su `config.json`, que se
+  cambia con `/config language`.
+
+Todos los textos están en `src/i18n.js`, uno por frase completa y con
+marcadores `{valor}`. Si falta una clave en español se usa la inglesa y queda en
+el log. No se traducen los nombres de jugadores, de squads y de gremios, ni los
+servidores de Albion (`europe`, `americas`, `asia`).
 
 ## Squads de jugadores y de gremio
 
@@ -184,6 +224,23 @@ después.
   servidor, `deploy:clean` conserva `/dm`.
 - Los comandos globales solo se ofrecen dentro de servidores, no por mensaje
   directo (y el bot rechaza cualquiera que llegue por DM).
+
+### Después de renombrar un comando
+
+Para Discord, cambiar el nombre de un comando es crear uno nuevo, no renombrar
+el viejo. Así pasó con `/sorteo` → `/raffle` y `/crear-rol` → `/create-role`
+(y los subcomandos de `/config`):
+
+- **Globales:** `deploy:prod` reemplaza la lista entera, así que los nombres
+  viejos desaparecen solos, con la misma hora de propagación.
+- **De guild:** si el servidor de desarrollo tiene comandos de un
+  `deploy:dev` antiguo, ahí siguen los viejos junto a los nuevos hasta que
+  corras `npm run deploy:clean`. Haz siempre `deploy:clean` y luego
+  `deploy:prod`.
+- **Avisa en el canal del gremio:** la gente tiene memoria muscular con los
+  nombres viejos. Con el cliente en español seguirán viendo `/sorteo` y
+  `/crear-rol`, pero los subcomandos de `/config` y las opciones de `/squads`
+  pasan a estar en inglés.
 
 El modo también se puede fijar con la variable de entorno `DEPLOY_SCOPE`
 (`guild` | `global` | `clean`, por defecto `guild`) en vez del argumento CLI —

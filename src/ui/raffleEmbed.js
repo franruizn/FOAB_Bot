@@ -1,4 +1,8 @@
 import { EmbedBuilder } from 'discord.js';
+import { t, tn, DEFAULT_LANGUAGE } from '../i18n.js';
+
+// Todo lo de este fichero se publica en el canal: va en el idioma del
+// servidor, que el llamador pasa como `lang`.
 
 const RESULT_COLOR = 0x00ff9d;
 const TOP_N = 5;
@@ -7,20 +11,18 @@ const ROLLS_FIELD_MAX = 1020;
 /**
  * Contenido (texto plano, no embed) del anuncio inicial del sorteo.
  *
- * `requiredRoleId` (el rol del parámetro opcional de /sorteo) y `roleId` (el
+ * `requiredRoleId` (el rol del parámetro opcional de /raffle) y `roleId` (el
  * raffleRoleId de la config del servidor, que solo pinga sin restringir) son mutuamente
  * excluyentes: si hay rol restrictivo, ese es el público del sorteo y es el
  * único que se menciona — pingear también raffleRoleId sería ruido.
- * @param {{ creatorId: string, endsAtUnixSeconds: number, roleId?: string | null, requiredRoleId?: string | null }} params
+ * @param {{ creatorId: string, endsAtUnixSeconds: number, roleId?: string | null, requiredRoleId?: string | null, lang?: string }} params
  */
-export function buildRaffleAnnouncementContent({ creatorId, endsAtUnixSeconds, roleId, requiredRoleId }) {
+export function buildRaffleAnnouncementContent({ creatorId, endsAtUnixSeconds, roleId, requiredRoleId, lang = DEFAULT_LANGUAGE }) {
   const pingRoleId = requiredRoleId ?? roleId;
-  const rolePing = pingRoleId ? `<@&${pingRoleId}> ` : '';
-  const restriction = requiredRoleId ? ` (solo miembros de <@&${requiredRoleId}>)` : '';
-  return (
-    `${rolePing}<@${creatorId}> ha comenzado un sorteo que terminará <t:${endsAtUnixSeconds}:R>.\n\n` +
-    `Reacciona con 🎉 para participar${restriction}.`
-  );
+  const values = { ping: pingRoleId ? `<@&${pingRoleId}> ` : '', creator: creatorId, ends: endsAtUnixSeconds };
+  return requiredRoleId
+    ? t('raffle.announce.restricted', lang, { ...values, role: requiredRoleId })
+    : t('raffle.announce', lang, values);
 }
 
 /**
@@ -50,9 +52,10 @@ function truncateRollsText(text) {
  * @param {{ roll: number, participants: Array<unknown> } | null} [params.tiebreak]
  * @param {number} [params.totalReactors] - cuántos reaccionaron en total, antes de filtrar por rol.
  *   Si es mayor que results.length, hubo descartes y el footer lo explicita.
+ * @param {string} [params.lang]
  * @returns {EmbedBuilder}
  */
-export function buildRaffleResultsEmbed({ results, delayed = false, tiebreak = null, totalReactors }) {
+export function buildRaffleResultsEmbed({ results, delayed = false, tiebreak = null, totalReactors, lang = DEFAULT_LANGUAGE }) {
   const winner = results[0];
   const top5 = results.slice(0, TOP_N);
 
@@ -63,31 +66,29 @@ export function buildRaffleResultsEmbed({ results, delayed = false, tiebreak = n
     })
     .join('\n');
 
-  const descriptionLines = [`🥇 **Ganador: <@${winner.user.id}> con una tirada de ${winner.roll}!**`];
+  const descriptionLines = [t('raffle.results.winner', lang, { user: winner.user.id, roll: winner.roll })];
   if (results.length === 1) {
-    descriptionLines.push('Único participante.');
+    descriptionLines.push(t('raffle.results.single', lang));
   }
   if (tiebreak) {
-    descriptionLines.push(
-      `⚖️ Empate a **${tiebreak.roll}** entre ${tiebreak.participants.length} participantes, resuelto con una segunda tirada.`,
-    );
+    descriptionLines.push(t('raffle.results.tiebreak', lang, { roll: tiebreak.roll, count: tiebreak.participants.length }));
   }
   if (delayed) {
-    descriptionLines.push('⏱️ Este sorteo se resolvió con retraso porque el bot estuvo caído al cumplirse el plazo.');
+    descriptionLines.push(t('raffle.results.delayed', lang));
   }
 
-  let footerText = 'Tiradas 1–100';
+  let footerText = t('raffle.footer.rolls', lang);
   if (typeof totalReactors === 'number' && totalReactors > results.length) {
-    footerText += ` · ${results.length} de ${totalReactors} participantes válidos`;
+    footerText = t('raffle.footer.valid', lang, { valid: results.length, total: totalReactors });
   } else if (results.length > TOP_N) {
-    footerText += ` · ${results.length} participantes`;
+    footerText = t('raffle.footer.count', lang, { count: results.length });
   }
 
   return new EmbedBuilder()
     .setColor(RESULT_COLOR)
-    .setTitle('🎲 Resultados del sorteo 🎲')
+    .setTitle(t('raffle.results.title', lang))
     .setDescription(descriptionLines.join('\n\n'))
-    .addFields({ name: 'ROLLS', value: truncateRollsText(leaderboardText) })
+    .addFields({ name: t('raffle.results.rollsField', lang), value: truncateRollsText(leaderboardText) })
     .setFooter({ text: footerText });
 }
 
@@ -98,23 +99,26 @@ export function buildRaffleResultsEmbed({ results, delayed = false, tiebreak = n
  * - hubo reacciones pero ninguna cumplía el rol requerido (totalReactors > 0);
  * - el rol requerido ya no existe al resolver (roleMissing), caso en el que
  *   no se puede ni comprobar quién cumplía el requisito.
- * @param {{ delayed?: boolean, totalReactors?: number, roleMissing?: boolean }} params
+ * @param {{ delayed?: boolean, totalReactors?: number, roleMissing?: boolean, lang?: string }} params
  * @returns {EmbedBuilder}
  */
-export function buildNoParticipantsEmbed({ delayed = false, totalReactors = 0, roleMissing = false } = {}) {
+export function buildNoParticipantsEmbed({ delayed = false, totalReactors = 0, roleMissing = false, lang = DEFAULT_LANGUAGE } = {}) {
   const lines = [];
 
   if (roleMissing) {
-    lines.push('El rol requerido para este sorteo ya no existe, así que no se pudo comprobar quién cumplía el requisito. Nadie participó.');
+    lines.push(t('raffle.none.roleMissing', lang));
   } else if (totalReactors > 0) {
-    lines.push(`${totalReactors} persona(s) reaccionaron, pero ninguna cumplía el rol requerido para participar.`);
+    lines.push(tn('raffle.none.noValid', totalReactors, lang));
   } else {
-    lines.push('Nadie participó.');
+    lines.push(t('raffle.none.nobody', lang));
   }
 
   if (delayed) {
-    lines.push('⏱️ Este sorteo se resolvió con retraso porque el bot estuvo caído al cumplirse el plazo.');
+    lines.push(t('raffle.results.delayed', lang));
   }
 
-  return new EmbedBuilder().setColor(RESULT_COLOR).setTitle('🎲 Resultados del sorteo 🎲').setDescription(lines.join('\n\n'));
+  return new EmbedBuilder()
+    .setColor(RESULT_COLOR)
+    .setTitle(t('raffle.results.title', lang))
+    .setDescription(lines.join('\n\n'));
 }

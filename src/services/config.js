@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { rutaDe, getConfig, setConfig } from './guildStore.js';
 import { withFileLock, backupCurrentFile, atomicWriteJson } from './fileStore.js';
+import { LocalizedError, t, DEFAULT_LANGUAGE } from '../i18n.js';
 
 const MIN_NAME_LENGTH = 3;
 const MAX_NAME_LENGTH = 16;
@@ -8,9 +9,18 @@ const MAX_GUILD_NAME_LENGTH = 64;
 const ROOT_KEYS = new Set(['squads']);
 const SQUAD_KEYS = new Set(['isGuild', 'members']);
 
-export class ConfigError extends Error {
-  constructor(message, { path, reason } = {}) {
-    super(message);
+/**
+ * squads.json no se puede leer o no valida. El texto sale de src/i18n.js
+ * (configFile.*); `reason` es para el código y el log.
+ */
+export class ConfigError extends LocalizedError {
+  /**
+   * @param {string} key
+   * @param {Record<string, string | number>} values
+   * @param {{ path?: string, reason?: string }} [meta]
+   */
+  constructor(key, values, { path, reason } = {}) {
+    super(key, values);
     this.name = 'ConfigError';
     this.path = path;
     this.reason = reason;
@@ -43,7 +53,9 @@ export class ConfigError extends Error {
  * @property {Map<string, SquadEntry>} squads - clave de squad (lowercase) -> entrada
  * @property {Map<string, string>} playerToSquad - jugador (lowercase) -> clave de squad de JUGADORES (lowercase)
  * @property {Map<string, string>} guildToSquad - gremio (lowercase) -> clave de squad de GREMIO (lowercase)
- * @property {string[]} warnings - avisos no bloqueantes (ej. jugador repetido en varios squads)
+ * @property {Array<{ key: string, values: object }>} notices - avisos no bloqueantes (ej. jugador repetido en
+ *   varios squads), como clave de i18n: /health los enseña en el idioma de quien lo lee
+ * @property {string[]} warnings - los mismos avisos en inglés, para el log
  */
 
 // Indexada por guildId: una caché suelta devolvería los squads de otro
@@ -85,73 +97,59 @@ export function isValidGuildName(value) {
  */
 export function normalizeConfig(raw, path) {
   if (!isPlainObject(raw)) {
-    throw new ConfigError(`El archivo de configuración "${path}" debe contener un objeto raíz`, {
-      path,
-      reason: 'invalid_root',
-    });
+    throw new ConfigError('configFile.root', { path }, { path, reason: 'invalid_root' });
   }
 
   const rootKeys = Object.keys(raw);
   if (rootKeys.length !== ROOT_KEYS.size || !rootKeys.every((key) => ROOT_KEYS.has(key))) {
     throw new ConfigError(
-      `El archivo "${path}" debe tener exactamente la clave "squads" (encontradas: ${rootKeys.join(', ') || 'ninguna'})`,
+      'configFile.rootKeys',
+      { path, keys: rootKeys.join(', ') || '—' },
       { path, reason: 'invalid_root_keys' },
     );
   }
 
   if (!isPlainObject(raw.squads)) {
-    throw new ConfigError(`"squads" en "${path}" debe ser un objeto`, { path, reason: 'invalid_squads' });
+    throw new ConfigError('configFile.squadsNotObject', { path }, { path, reason: 'invalid_squads' });
   }
 
   const squadOrder = [];
   const squads = new Map();
   const playerToSquad = new Map();
   const guildToSquad = new Map();
-  const warnings = [];
+  const notices = [];
 
   for (const [squadKeyRaw, entry] of Object.entries(raw.squads)) {
     const key = squadKeyRaw.toLowerCase();
 
     if (squads.has(key)) {
-      throw new ConfigError(
-        `El squad "${squadKeyRaw}" en "${path}" está duplicado (case-insensitive)`,
-        { path, reason: 'duplicate_squad' },
-      );
+      throw new ConfigError('configFile.duplicateSquad', { squad: squadKeyRaw, path }, { path, reason: 'duplicate_squad' });
     }
 
     const entryKeys = isPlainObject(entry) ? Object.keys(entry) : [];
     if (!isPlainObject(entry) || entryKeys.length !== SQUAD_KEYS.size || !entryKeys.every((k) => SQUAD_KEYS.has(k))) {
-      throw new ConfigError(
-        `El squad "${squadKeyRaw}" en "${path}" debe ser un objeto con exactamente "isGuild" y "members"`,
-        { path, reason: 'invalid_squad_value' },
-      );
+      throw new ConfigError('configFile.squadShape', { squad: squadKeyRaw, path }, { path, reason: 'invalid_squad_value' });
     }
     if (typeof entry.isGuild !== 'boolean') {
-      throw new ConfigError(`"isGuild" del squad "${squadKeyRaw}" en "${path}" debe ser true o false`, {
-        path,
-        reason: 'invalid_is_guild',
-      });
+      throw new ConfigError('configFile.isGuildType', { squad: squadKeyRaw, path }, { path, reason: 'invalid_is_guild' });
     }
     if (!Array.isArray(entry.members)) {
-      throw new ConfigError(`"members" del squad "${squadKeyRaw}" en "${path}" debe ser un array`, {
-        path,
-        reason: 'invalid_members',
-      });
+      throw new ConfigError('configFile.membersType', { squad: squadKeyRaw, path }, { path, reason: 'invalid_members' });
     }
 
     if (entry.isGuild) {
       if (!isValidGuildName(squadKeyRaw)) {
         throw new ConfigError(
-          `El squad de gremio "${squadKeyRaw}" en "${path}" no es un nombre de gremio válido ` +
-            `(1 a ${MAX_GUILD_NAME_LENGTH} caracteres, sin espacios al principio ni al final)`,
+          'configFile.guildName',
+          { squad: squadKeyRaw, path, max: MAX_GUILD_NAME_LENGTH },
           { path, reason: 'invalid_guild_name' },
         );
       }
       if (entry.members.length > 0) {
-        warnings.push(
-          `El squad de gremio "${squadKeyRaw}" tiene ${entry.members.length} nombre(s) en "members": se ignoran, ` +
-            'sus miembros salen del gremio.',
-        );
+        notices.push({
+          key: `configFile.warning.guildMembers.${entry.members.length === 1 ? 'one' : 'other'}`,
+          values: { squad: squadKeyRaw, count: entry.members.length },
+        });
       }
       guildToSquad.set(key, key);
       squadOrder.push(key);
@@ -165,8 +163,8 @@ export function normalizeConfig(raw, path) {
     for (const member of entry.members) {
       if (!isValidPlayerName(member)) {
         throw new ConfigError(
-          `El squad "${squadKeyRaw}" en "${path}" contiene un nombre de jugador inválido: ${JSON.stringify(member)} ` +
-            `(debe ser un string de ${MIN_NAME_LENGTH} a ${MAX_NAME_LENGTH} caracteres)`,
+          'configFile.member',
+          { squad: squadKeyRaw, path, member: JSON.stringify(member), min: MIN_NAME_LENGTH, max: MAX_NAME_LENGTH },
           { path, reason: 'invalid_member' },
         );
       }
@@ -175,9 +173,10 @@ export function normalizeConfig(raw, path) {
       if (!memberMap.has(memberKey)) memberMap.set(memberKey, member.trim());
 
       if (playerToSquad.has(memberKey) && playerToSquad.get(memberKey) !== key) {
-        warnings.push(
-          `El jugador "${member.trim()}" está en varios squads: "${playerToSquad.get(memberKey)}" y "${key}" (se mantiene "${playerToSquad.get(memberKey)}")`,
-        );
+        notices.push({
+          key: 'configFile.warning.playerInSeveral',
+          values: { player: member.trim(), kept: playerToSquad.get(memberKey), other: key },
+        });
       } else {
         playerToSquad.set(memberKey, key);
       }
@@ -187,7 +186,8 @@ export function normalizeConfig(raw, path) {
     squads.set(key, { display: squadKeyRaw.toUpperCase(), isGuild: false, members: memberMap, guildName: null });
   }
 
-  return { squadOrder, squads, playerToSquad, guildToSquad, warnings };
+  const warnings = notices.map(({ key, values }) => t(key, DEFAULT_LANGUAGE, values));
+  return { squadOrder, squads, playerToSquad, guildToSquad, notices, warnings };
 }
 
 // --- migración del formato viejo ---
@@ -239,11 +239,7 @@ export function migrateLegacySquads(raw, { mainGuild }) {
     const clash = Object.keys(squads).find((key) => key.toLowerCase() === guildName.toLowerCase());
     if (clash) {
       if (squads[clash].isGuild) continue; // ya era un squad de gremio
-      throw new ConfigError(
-        `No se puede convertir el gremio "${guildName}" de la lista vieja en squad de gremio: ya hay un squad de ` +
-          `jugadores llamado "${clash}". Renombra uno de los dos en squads.json a mano. No se ha cambiado nada.`,
-        { reason: 'migration_conflict' },
-      );
+      throw new ConfigError('configFile.migrationConflict', { guild: guildName, squad: clash }, { reason: 'migration_conflict' });
     }
     squads[guildName] = { isGuild: true, members: [] };
     notes.push(`El gremio "${guildName}" de la lista vieja pasa a ser un squad de gremio.`);
@@ -312,10 +308,11 @@ async function readConfigFile(path, { allowLegacy = false } = {}) {
   try {
     stats = await stat(path);
   } catch (error) {
-    throw new ConfigError(`No se pudo acceder al archivo de configuración en "${path}": ${error.message}`, {
-      path,
-      reason: error.code === 'ENOENT' ? 'not_found' : 'stat_error',
-    });
+    throw new ConfigError(
+      'configFile.notFound',
+      { path, detail: error.message },
+      { path, reason: error.code === 'ENOENT' ? 'not_found' : 'stat_error' },
+    );
   }
 
   let raw;
@@ -323,10 +320,7 @@ async function readConfigFile(path, { allowLegacy = false } = {}) {
     const content = await readFile(path, 'utf8');
     raw = JSON.parse(content);
   } catch (error) {
-    throw new ConfigError(`No se pudo leer o parsear "${path}": ${error.message}`, {
-      path,
-      reason: 'parse_error',
-    });
+    throw new ConfigError('configFile.parse', { path, detail: error.message }, { path, reason: 'parse_error' });
   }
 
   if (allowLegacy && isLegacySquadsConfig(raw)) {

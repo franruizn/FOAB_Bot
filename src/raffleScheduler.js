@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { listarGuilds } from './services/guildStore.js';
 import { loadRaffles, removeRaffle } from './services/rafflesStore.js';
 import { buildRaffleResultsEmbed, buildNoParticipantsEmbed } from './ui/raffleEmbed.js';
+import { t, guildLang } from './i18n.js';
 
 const RAFFLE_EMOJI = '🎉';
 const REACTORS_PAGE_LIMIT = 100;
@@ -136,6 +137,8 @@ function applyTiebreak(results) {
  */
 export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
   clearActiveTimer(raffle.guildId, raffle.id);
+  // Todo lo que se publica al resolver lo lee el canal: idioma del servidor.
+  const lang = await guildLang(raffle.guildId).catch(() => undefined);
 
   let channel;
   try {
@@ -151,7 +154,7 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
     message = await channel.messages.fetch(raffle.messageId);
   } catch (error) {
     console.error(`[raffle] El mensaje ${raffle.messageId} del sorteo ${raffle.id} no se pudo leer (¿borrado?):`, error?.message ?? error);
-    await channel.send('⚠️ No se pudo resolver un sorteo: el mensaje original fue borrado.').catch((sendError) => {
+    await channel.send(t('raffle.messageDeleted', lang)).catch((sendError) => {
       console.error('[raffle] Tampoco se pudo avisar en el canal:', sendError?.stack ?? sendError);
     });
     await removeRaffle(raffle.guildId, raffle.id);
@@ -173,7 +176,7 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
 
   if (participants.length === 0) {
     await channel.send({
-      embeds: [buildNoParticipantsEmbed({ delayed, totalReactors: reactors.length, roleMissing })],
+      embeds: [buildNoParticipantsEmbed({ delayed, totalReactors: reactors.length, roleMissing, lang })],
       reply,
     });
     await removeRaffle(raffle.guildId, raffle.id);
@@ -182,8 +185,12 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
 
   const { sorted, tiebreak } = applyTiebreak(rollParticipants(participants));
   const winner = sorted[0];
-  const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak, totalReactors: reactors.length });
-  await channel.send({ content: `<@${winner.user.id}> ha ganado el sorteo de <@${raffle.creatorId}>`, embeds: [embed], reply });
+  const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak, totalReactors: reactors.length, lang });
+  await channel.send({
+    content: t('raffle.winnerLine', lang, { winner: winner.user.id, creator: raffle.creatorId }),
+    embeds: [embed],
+    reply,
+  });
 
   await removeRaffle(raffle.guildId, raffle.id);
 

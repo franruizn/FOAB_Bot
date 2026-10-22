@@ -25,7 +25,8 @@ after(async () => {
 
 beforeEach(async () => {
   process.env.DM_OWNER_ID = OWNER;
-  await setConfig(GUILD_ID, { logChannelId: 'log-chan', dmOptoutRoleId: null });
+  // Servidor en español: el progreso y el resultado del canal salen en su idioma.
+  await setConfig(GUILD_ID, { logChannelId: 'log-chan', dmOptoutRoleId: null, idioma: 'es' });
   await rm(DM_STATE_PATH, { force: true });
 });
 
@@ -96,6 +97,8 @@ function makeInteraction({ userId = OWNER, rol = null, lista = null, members = n
   const interaction = {
     id,
     guildId: GUILD_ID,
+    // El dueño tiene el cliente en español: lo efímero sale en su idioma.
+    locale: 'es-ES',
     client,
     user: { id: userId, tag: `${userId}#0001`, username: userId },
     member: { displayName: 'Remitente' },
