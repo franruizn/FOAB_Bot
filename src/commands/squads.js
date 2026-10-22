@@ -12,7 +12,7 @@ import {
 } from '../services/squadsStore.js';
 import { mutationEmbed, infoEmbed } from '../ui/squadsEmbed.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
-import { ensureOfficer } from '../permissions.js';
+import { ensureOfficer, isOfficer } from '../permissions.js';
 import { notifySquadMutation } from '../logChannel.js';
 
 const READ_ONLY_SUBCOMMANDS = new Set(['list', 'show', 'find']);
@@ -183,7 +183,7 @@ async function handleShow(interaction) {
       `🛡️ Sigue al gremio de Albion **${escapeMarkdown(squad.guildName)}**.\n` +
       'Sus miembros se toman del gremio en cada batalla: no hay lista de nombres.';
   } else {
-    const members = [...squad.members].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    const members = [...squad.members.values()].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
     description = members.length > 0 ? members.map((name) => escapeMarkdown(name)).join('\n') : '—';
   }
 
@@ -434,8 +434,9 @@ async function handleFind(interaction) {
   const nameLower = playerInput.toLowerCase();
   const squadKey = config.playerToSquad.get(nameLower);
 
-  const content = squadKey
-    ? `**${escapeMarkdown(playerInput)}** está en el squad **${config.squads.get(squadKey).display}**.`
+  const squad = squadKey ? config.squads.get(squadKey) : null;
+  const content = squad
+    ? `**${escapeMarkdown(squad.members.get(nameLower))}** está en el squad **${squad.display}**.`
     : `**${escapeMarkdown(playerInput)}** no está en ningún squad conocido.`;
 
   await interaction.editReply({ content });
@@ -445,6 +446,13 @@ async function handleFind(interaction) {
  * @param {import('discord.js').AutocompleteInteraction} interaction
  */
 export async function autocomplete(interaction) {
+  // Mismo filtro que execute(): quien no puede usar /squads tampoco recibe
+  // sus squads ni sus jugadores como sugerencias.
+  if (!(await isOfficer(interaction))) {
+    await interaction.respond([]);
+    return;
+  }
+
   const focused = interaction.options.getFocused(true);
   const subcommand = interaction.options.getSubcommand(false);
 
@@ -473,10 +481,13 @@ export async function autocomplete(interaction) {
     const squadInput = interaction.options.getString('squad');
     const squadKey = squadInput?.trim().toLowerCase();
     const squad = squadKey ? config.squads.get(squadKey) : null;
-    choices = squad ? [...squad.members].map((name) => ({ name, value: name })) : [];
+    choices = squad ? [...squad.members.values()].map((name) => ({ name, value: name })) : [];
   } else if (focused.name === 'jugador') {
     // find / move: cualquier jugador conocido
-    choices = [...config.playerToSquad.keys()].map((name) => ({ name, value: name }));
+    choices = [...config.playerToSquad].map(([nameLower, squadKey]) => {
+      const name = config.squads.get(squadKey).members.get(nameLower);
+      return { name, value: name };
+    });
   }
 
   const query = focused.value.toLowerCase();

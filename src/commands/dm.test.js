@@ -275,3 +275,34 @@ test('/dm: cancelar no envía nada ni consume el cooldown', async () => {
   await execute(makeInteraction({ lista: '@uno', members }));
   assert.equal(members.get('1')._received.length, 1);
 });
+
+// --- /dm en el modelo multiservidor: dueño global, destinatarios del servidor ---
+
+test('/dm: un Administrador del servidor que no es DM_OWNER_ID se rechaza igual', async () => {
+  const interaction = makeInteraction({ userId: 'admin-1' });
+  interaction.memberPermissions = { has: () => true };
+
+  await execute(interaction);
+
+  assert.match(embedText(interaction._replies[0]), /Sin permiso/);
+  assert.equal(interaction._modals.length, 0);
+});
+
+test('/dm: el rol de exclusión es el del servidor donde se ejecuta, no el de otro', async () => {
+  // El otro servidor excluye "optout"; este no tiene rol de exclusión.
+  await setConfig('100000000000000002', { dmOptoutRoleId: 'optout' });
+  const members = new Map([['1', makeMember('1', 'uno', { roles: ['grupo', 'optout'] })]]);
+
+  await execute(makeInteraction({ rol: { id: 'grupo' }, members }));
+
+  assert.equal(members.get('1')._received.length, 1);
+});
+
+test('/dm: /config no ofrece ninguna forma de cambiar quién puede usarlo', async () => {
+  const { CONFIG_FIELDS } = await import('../services/configFields.js');
+  const { GuildConfigError } = await import('../services/guildStore.js');
+  assert.ok(CONFIG_FIELDS.every((field) => !/owner|dueño/i.test(field.key)));
+  for (const key of ['dmOwnerId', 'DM_OWNER_ID']) {
+    await assert.rejects(() => setConfig(GUILD_ID, { [key]: 'otro' }), GuildConfigError);
+  }
+});

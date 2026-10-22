@@ -81,6 +81,7 @@ export async function execute(interaction) {
     battlesProcessed: processed,
     battlesRequested: battleIds.length,
     mainGuildDisplay: mainGuild,
+    hasSquads: config.squadOrder.length > 0,
     originalUrl: url,
     battleDate: resolveBattleDate(events),
   });

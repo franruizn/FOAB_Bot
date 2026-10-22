@@ -51,3 +51,47 @@ test('errores de configuración del registro', () => {
   assert.throws(() => planDeploy({ scope: 'clean', commands, dmCommand, env: {} }), /GUILD_ID/);
   assert.throws(() => planDeploy({ scope: 'global', commands, dmCommand, env: { DM_GUILD_ID: 'abc' } }), /DM_GUILD_ID/);
 });
+
+// --- con los comandos reales: lo que de verdad se registra ---
+
+const REAL_MODULES = ['getkills', 'squads', 'attendance', 'health', 'sorteo', 'crearRol', 'config'];
+const realCommands = await Promise.all(REAL_MODULES.map(async (name) => (await import(`./commands/${name}.js`)).data));
+const { data: realDm } = await import('./commands/dm.js');
+const realPlan = planDeploy({ scope: 'global', commands: realCommands, dmCommand: realDm, env: { DM_GUILD_ID: OWNER } });
+
+test('registro real: /dm no está en el lote global, solo en DM_GUILD_ID', () => {
+  assert.ok(!names(realPlan.steps[0].body).includes('dm'));
+  assert.deepEqual(realPlan.steps.slice(1).map((s) => [s.target, names(s.body)]), [[OWNER, ['dm']]]);
+});
+
+test('registro real: no queda ningún /cta, /comp ni /maestria', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const files = await readdir(new URL('./commands/', import.meta.url));
+  assert.ok(files.every((file) => !/cta|comp|maestria/i.test(file)), files.join(', '));
+  const registered = [...names(realPlan.steps[0].body), 'dm'];
+  assert.ok(registered.every((name) => !/^(cta|comp|maestria)$/.test(name)), registered.join(', '));
+});
+
+// --- IDIOMA: pendiente, no implementado (todo: se informan sin romper la suite) ---
+
+const json = (name) => realPlan.steps[0].body.find((c) => c.name === name);
+
+test('/raffle en inglés, /sorteo con el cliente en español: el mismo comando', { todo: 'BLOQUEANTE: no hay localizaciones' }, () => {
+  const raffle = json('raffle');
+  assert.ok(raffle, 'no existe /raffle');
+  assert.equal(raffle.name_localizations?.['es-ES'], 'sorteo');
+});
+
+test('/crear-rol ya no existe suelto: es la localización española de un nombre en inglés', { todo: 'BLOQUEANTE: no hay localizaciones' }, () => {
+  assert.equal(json('crear-rol'), undefined);
+});
+
+test('/squads y /config: subcomandos en inglés, descripciones localizadas', { todo: 'BLOQUEANTE: /config tiene subcomandos en español y nada está localizado' }, () => {
+  for (const name of ['squads', 'config']) {
+    for (const sub of json(name).options) {
+      assert.match(sub.name, /^[a-z-]+$/);
+      assert.ok(sub.description_localizations?.['es-ES'], `${name} ${sub.name} sin descripción en español`);
+    }
+  }
+  assert.ok(json('config').options.some((sub) => sub.name === 'language'), 'no existe /config language');
+});

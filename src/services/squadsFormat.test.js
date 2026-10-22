@@ -109,7 +109,14 @@ test('migración: loadConfig convierte el fichero una vez, con backup, y luego l
 
   const config = await loadConfig(guildId);
 
-  assert.deepEqual([...config.squads.get('foab').members], ['fokinfran', 'danyhm']);
+  // Clave en minúsculas para comparar, nombre original para mostrar.
+  assert.deepEqual(
+    [...config.squads.get('foab').members],
+    [
+      ['fokinfran', 'FokinFran'],
+      ['danyhm', 'DanyHM'],
+    ],
+  );
   assert.equal(config.squads.get('dementia').isGuild, true);
   assert.deepEqual(await readSquadsFile(guildId), {
     squads: {

@@ -311,3 +311,27 @@ test('un servidor sin squads.json es un servidor sin squads, no un error', async
   await createSquad(guildId, 'foab');
   assert.deepEqual((await loadConfig(guildId)).squadOrder, ['foab']);
 });
+
+// --- quién puede usar /config: Administrador, no el rol de oficiales ---
+
+test('/config: un oficial SIN permiso de Administrador no puede, ni teniendo el rol', async () => {
+  const guildId = newGuildId();
+  await setConfig(guildId, { officerRoleId: '400000000000000009' });
+  const interaction = makeInteraction({ guildId, subcommand: 'gremio', admin: false, options: { nombre: 'FOAB' } });
+  interaction.member = { roles: { cache: new Map([['400000000000000009', true]]) } };
+
+  await execute(interaction);
+
+  assert.match(embedText(interaction._replies[0]), /Administrador/);
+  assert.equal((await getConfig(guildId)).albionGuild, null);
+});
+
+test('/config: un Administrador SIN el rol de oficiales sí puede (servidor recién añadido)', async () => {
+  const guildId = newGuildId();
+  await setConfig(guildId, { officerRoleId: '400000000000000010' });
+  const interaction = makeInteraction({ guildId, subcommand: 'gremio', options: { nombre: 'FOAB' } });
+
+  await execute(interaction);
+
+  assert.equal((await getConfig(guildId)).albionGuild, 'FOAB');
+});

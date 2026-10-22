@@ -91,11 +91,21 @@ function packFieldsIntoChunks(fields, firstChunkBudget) {
  * @param {number} params.battlesProcessed
  * @param {number} params.battlesRequested
  * @param {string} params.mainGuildDisplay - gremio principal del servidor (albionGuild), con su casing
+ * @param {boolean} [params.hasSquads] - false si el servidor no tiene ningún squad: se avisa en vez de
+ *   dejar un MAIN ZERG a solas que parece un fallo
  * @param {string} params.originalUrl
  * @param {Date} params.battleDate
  * @returns {EmbedBuilder[]}
  */
-export function buildKillsEmbed({ result, battlesProcessed, battlesRequested, mainGuildDisplay, originalUrl, battleDate }) {
+export function buildKillsEmbed({
+  result,
+  battlesProcessed,
+  battlesRequested,
+  mainGuildDisplay,
+  hasSquads = true,
+  originalUrl,
+  battleDate,
+}) {
   const { buckets, alliance, totals } = result;
   const guildBuckets = result.guildBuckets ?? [];
   const followedTotals = result.followedTotals ?? { kills: 0, deaths: 0, uniquePlayers: 0 };
@@ -106,6 +116,13 @@ export function buildKillsEmbed({ result, battlesProcessed, battlesRequested, ma
   // Las dos secciones nunca se suman en silencio: el TOTAL es solo del gremio
   // principal, y el conjunto va en una línea aparte etiquetada como tal.
   const description = [
+    ...(hasSquads
+      ? []
+      : [
+          '⚠️ This server has no squads yet, so everyone counts as MAIN ZERG. ' +
+            'An officer can create them with `/squads create`.',
+          '',
+        ]),
     `Battles processed: ${battlesProcessed}/${battlesRequested}`,
     `Friendly alliance (detected): ${escapeMarkdown(alliance) || EMPTY_FIELD_VALUE}`,
     `Unique counted players (${mainName}): ${totals.uniquePlayers}`,

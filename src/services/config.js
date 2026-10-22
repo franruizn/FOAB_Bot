@@ -32,7 +32,8 @@ export class ConfigError extends Error {
  * @typedef {object} SquadEntry
  * @property {string} display - para mostrar: la clave en MAYÚSCULA (jugadores) o el nombre del gremio tal cual (gremio)
  * @property {boolean} isGuild
- * @property {Set<string>} members - nombres de jugador (lowercase); siempre vacío si isGuild
+ * @property {Map<string, string>} members - jugador en minúsculas (para comparar) -> su nombre tal cual está en
+ *   squads.json (para mostrar); siempre vacío si isGuild
  * @property {string | null} guildName - nombre del gremio con su casing original, o null si es de jugadores
  */
 
@@ -154,11 +155,13 @@ export function normalizeConfig(raw, path) {
       }
       guildToSquad.set(key, key);
       squadOrder.push(key);
-      squads.set(key, { display: squadKeyRaw, isGuild: true, members: new Set(), guildName: squadKeyRaw });
+      squads.set(key, { display: squadKeyRaw, isGuild: true, members: new Map(), guildName: squadKeyRaw });
       continue;
     }
 
-    const memberSet = new Set();
+    // La clave en minúsculas es solo para comparar; el valor es el nombre que
+    // se muestra. Si un nombre se repite con otro casing, manda el primero.
+    const memberMap = new Map();
     for (const member of entry.members) {
       if (!isValidPlayerName(member)) {
         throw new ConfigError(
@@ -169,7 +172,7 @@ export function normalizeConfig(raw, path) {
       }
 
       const memberKey = member.trim().toLowerCase();
-      memberSet.add(memberKey);
+      if (!memberMap.has(memberKey)) memberMap.set(memberKey, member.trim());
 
       if (playerToSquad.has(memberKey) && playerToSquad.get(memberKey) !== key) {
         warnings.push(
@@ -181,7 +184,7 @@ export function normalizeConfig(raw, path) {
     }
 
     squadOrder.push(key);
-    squads.set(key, { display: squadKeyRaw.toUpperCase(), isGuild: false, members: memberSet, guildName: null });
+    squads.set(key, { display: squadKeyRaw.toUpperCase(), isGuild: false, members: memberMap, guildName: null });
   }
 
   return { squadOrder, squads, playerToSquad, guildToSquad, warnings };

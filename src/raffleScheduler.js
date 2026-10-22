@@ -14,9 +14,13 @@ const REACTORS_PAGE_LIMIT = 100;
 /** @type {Map<string, Map<string, NodeJS.Timeout>>} */
 const activeTimers = new Map();
 
+// Cancela el temporizador además de olvidarlo: si el sorteo se resuelve por
+// otro camino, el temporizador no puede volver a resolverlo al vencer.
+// Desde dentro del propio temporizador, clearTimeout no hace nada.
 function clearActiveTimer(guildId, raffleId) {
   const timers = activeTimers.get(guildId);
   if (!timers) return;
+  clearTimeout(timers.get(raffleId));
   timers.delete(raffleId);
   if (timers.size === 0) activeTimers.delete(guildId);
 }
