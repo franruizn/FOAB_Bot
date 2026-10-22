@@ -7,6 +7,7 @@ import * as health from './commands/health.js';
 import * as sorteo from './commands/sorteo.js';
 import * as crearRol from './commands/crearRol.js';
 import * as dm from './commands/dm.js';
+import * as config from './commands/config.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
 import { waitForAllFileWrites } from './services/fileStore.js';
 import { migrarAMultiguild } from './services/multiguildMigration.js';
@@ -55,7 +56,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, health, sorteo, crearRol, dm]) {
+for (const command of [getkills, squads, attendance, health, sorteo, crearRol, dm, config]) {
   client.commands.set(command.data.name, command);
 }
 

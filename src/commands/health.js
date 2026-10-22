@@ -5,15 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../services/config.js';
 import { SERVER_HOSTS } from '../services/albionApi.js';
 import { getConfig, rutaDe } from '../services/guildStore.js';
-import { errorEmbed } from '../ui/errorEmbed.js';
-import { isOfficer } from '../permissions.js';
+import { ensureOfficer } from '../permissions.js';
 
 const PACKAGE_JSON_PATH = fileURLToPath(new URL('../../package.json', import.meta.url));
 const EMBED_COLOR = 0x00ff9d;
 const PING_TIMEOUT_MS = 5_000;
 
 // Visible para todos en el picker de Discord a propósito: el filtro real es
-// isOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
+// ensureOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder().setName('health').setDescription('Estado del bot (solo oficiales)');
 
@@ -76,13 +75,7 @@ async function pingAlbionApi(server) {
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 export async function execute(interaction) {
-  if (!(await isOfficer(interaction))) {
-    await interaction.reply({
-      embeds: [errorEmbed('Sin permiso', 'Este comando es solo para el rol de oficiales.')],
-      ephemeral: true,
-    });
-    return;
-  }
+  if (!(await ensureOfficer(interaction))) return;
 
   await interaction.deferReply({ ephemeral: true });
 

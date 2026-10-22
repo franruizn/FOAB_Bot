@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { isOfficer } from '../permissions.js';
+import { ensureOfficer } from '../permissions.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
 import { buildCrearRolPreviewEmbed, buildCrearRolResultEmbed } from '../ui/crearRolEmbed.js';
 import { resolveMentionList } from '../services/mentionList.js';
@@ -15,7 +15,7 @@ function contieneMencionMasiva(texto) {
 }
 
 // Visible para todos en el picker de Discord a propósito: el filtro real es
-// isOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
+// ensureOfficer() (officerRoleId del servidor) en runtime, no un permiso de Discord por
 // servidor que haya que reconfigurar a mano en cada uno.
 export const data = new SlashCommandBuilder()
   .setName('crear-rol')
@@ -32,13 +32,7 @@ export const data = new SlashCommandBuilder()
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 export async function execute(interaction) {
-  if (!(await isOfficer(interaction))) {
-    await interaction.reply({
-      embeds: [errorEmbed('Sin permiso', 'Este comando es solo para el rol de oficiales.')],
-      ephemeral: true,
-    });
-    return;
-  }
+  if (!(await ensureOfficer(interaction))) return;
 
   const nombreInput = interaction.options.getString('nombre', true).trim();
   const lista = interaction.options.getString('lista', true);

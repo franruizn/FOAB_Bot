@@ -1,8 +1,8 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { parseAlbionbbUrl } from '../services/albionbb.js';
 import { getBattle, getBattleEvents } from '../services/albionApi.js';
-import { loadConfig, ConfigError } from '../services/config.js';
-import { getConfig, rutaDe } from '../services/guildStore.js';
+import { loadConfig } from '../services/config.js';
+import { requireConfig } from '../services/configFields.js';
 import { aggregateBattle } from '../services/aggregate.js';
 import { buildKillsEmbed } from '../ui/killsEmbed.js';
 
@@ -43,13 +43,7 @@ export async function execute(interaction) {
   // loadConfig primero: si squads.json venía en el formato viejo, su
   // conversión puede fijar albionGuild.
   const config = await loadConfig(interaction.guildId);
-  const { albionGuild: mainGuild } = await getConfig(interaction.guildId);
-  if (!mainGuild) {
-    throw new ConfigError('Este servidor no tiene gremio principal (albionGuild) en su config.json.', {
-      path: rutaDe(interaction.guildId, 'config.json'),
-      reason: 'missing_main_guild',
-    });
-  }
+  const { albionGuild: mainGuild } = await requireConfig(interaction.guildId, 'albionGuild');
 
   const events = [];
   const battles = [];

@@ -44,6 +44,7 @@ function makeGuild({ roleNames = [], members = new Map(), managerPermission = tr
   return {
     roles: {
       cache: {
+        has: (id) => id === 'officer-role',
         some: (fn) => roleNames.some((name) => fn({ name })),
         size: roleNames.length,
       },

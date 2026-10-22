@@ -1,7 +1,7 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { getGuildAttendance } from '../services/albionbbApi.js';
 import { loadConfig } from '../services/config.js';
-import { getConfig } from '../services/guildStore.js';
+import { requireConfig } from '../services/configFields.js';
 import { buildAttendanceEmbed, buildPlayerNotFoundEmbed } from '../ui/attendanceEmbed.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -83,10 +83,7 @@ function suggestClosestNames(input, names, limit = SUGGESTION_COUNT) {
  * @param {string} discordGuildId
  */
 async function requireAlbionbbConfig(discordGuildId) {
-  const { albionbbGuildId, albionServer } = await getConfig(discordGuildId);
-  if (!albionbbGuildId || !albionServer) {
-    throw new Error('Este servidor no tiene configurado el gremio de albionbb (albionbbGuildId) y/o el servidor de Albion (albionServer).');
-  }
+  const { albionbbGuildId, albionServer } = await requireConfig(discordGuildId, 'albionbbGuildId', 'albionServer');
   return { albionbbGuildId, server: albionServer };
 }
 

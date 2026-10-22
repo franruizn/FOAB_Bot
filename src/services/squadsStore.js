@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import {
   loadConfig,
   normalizeConfig,
@@ -11,7 +10,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_GUILD_NAME_LENGTH,
 } from './config.js';
-import { withFileLock, backupCurrentFile, atomicWriteJson } from './fileStore.js';
+import { withFileLock, readJsonFile, backupCurrentFile, atomicWriteJson } from './fileStore.js';
 import { rutaDe, getConfig } from './guildStore.js';
 
 const SQUAD_KEY_MAX_LENGTH = 32;
@@ -136,7 +135,8 @@ async function rejectIfMainGuild(guildId, guildName) {
 export async function mutateSquadsConfig(guildId, mutateFn) {
   const filePath = rutaDe(guildId, 'squads.json');
   return withFileLock(filePath, async () => {
-    let raw = JSON.parse(await readFile(filePath, 'utf8'));
+    // Sin squads.json (servidor recién añadido) se parte de uno vacío.
+    let raw = await readJsonFile(filePath, { squads: {} });
     if (isLegacySquadsConfig(raw)) raw = await persistLegacyMigration(guildId, raw, filePath);
 
     const { data, report } = mutateFn(structuredClone(raw));

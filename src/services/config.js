@@ -343,10 +343,11 @@ export async function loadConfigFromFile(path) {
 
 /**
  * Carga (y cachea) el squads.json del servidor `guildId`. Si está en el
- * formato viejo lo convierte una vez, automáticamente y sin perder nada.
+ * formato viejo lo convierte una vez, automáticamente y sin perder nada. Si
+ * no existe, devuelve una config sin squads.
  * @param {string} guildId
  * @returns {Promise<ConfigData>}
- * @throws {ConfigError} si el archivo no existe o no valida
+ * @throws {ConfigError} si el archivo no se puede leer o no valida
  */
 export async function loadConfig(guildId) {
   const path = rutaDe(guildId, 'squads.json');
@@ -357,7 +358,16 @@ export async function loadConfig(guildId) {
     if (stats && stats.mtimeMs === cached.mtimeMs) return cached.data;
   }
 
-  let result = await readConfigFile(path, { allowLegacy: true });
+  let result;
+  try {
+    result = await readConfigFile(path, { allowLegacy: true });
+  } catch (error) {
+    // Un servidor recién añadido todavía no tiene squads.json: no es un
+    // error, es un servidor sin squads. El fichero se crea con el primer
+    // /squads create.
+    if (error instanceof ConfigError && error.reason === 'not_found') return normalizeConfig({ squads: {} }, path);
+    throw error;
+  }
   if (result.legacy) {
     await migrateFileIfLegacy(guildId);
     result = await readConfigFile(path);

@@ -2,6 +2,7 @@ import { InvalidLinkError } from './services/albionbb.js';
 import { AlbionApiError } from './services/albionApi.js';
 import { AlbionbbApiError } from './services/albionbbApi.js';
 import { ConfigError } from './services/config.js';
+import { MissingConfigError } from './services/configFields.js';
 import { errorEmbed } from './ui/errorEmbed.js';
 import { isOfficer } from './permissions.js';
 
@@ -57,6 +58,18 @@ function classifyError(error) {
     console.error(`AlbionbbApiError ${error.status} (guildId=${error.guildId})`);
     return {
       embed: errorEmbed('albionbb no disponible', 'albionbb no responde ahora mismo, inténtalo más tarde.'),
+      officerOnly: false,
+      known: true,
+    };
+  }
+
+  // A diferencia de ConfigError (un fichero roto, detalle para oficiales),
+  // esto es un servidor a medio configurar: lo ve quien lo ejecutó, porque
+  // el mensaje ya dice qué falta y con qué comando se arregla.
+  if (error instanceof MissingConfigError) {
+    console.error(`MissingConfigError (${error.key})`);
+    return {
+      embed: errorEmbed('Falta configuración', error.message),
       officerOnly: false,
       known: true,
     };

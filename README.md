@@ -33,8 +33,40 @@ DATA_DIR/
 ```
 
 `config.json` se crea con valores vacíos la primera vez que el bot lo necesita.
-Todavía no hay ningún comando para editarlo: de momento se edita a mano, con el
-bot parado.
+Se edita con `/config` (ver abajo), no a mano.
+
+## Configurar un servidor: `/config`
+
+Lo primero al añadir el bot a un servidor es `/config ver`: enseña cada valor,
+marca los que faltan y dice qué comandos no funcionan todavía por ello.
+
+`/config` exige el permiso nativo de **Administrador** de Discord, no el rol de
+oficiales (en un servidor recién añadido todavía no hay rol de oficiales que
+exigir). Se comprueba en tiempo de ejecución: aunque alguien cambie quién lo ve
+desde los ajustes de integraciones del servidor, sin Administrador no hace nada.
+El resto de comandos de gestión siguen usando el rol de oficiales.
+
+| Subcomando | Campo | Sin él |
+|---|---|---|
+| `/config oficial <rol>` | `officerRoleId` | `/squads`, `/sorteo`, `/crear-rol` y `/health` no funcionan |
+| `/config logs <canal>` | `logChannelId` | los cambios y errores no quedan registrados |
+| `/config sorteo-rol <rol>` | `raffleRoleId` | opcional: `/sorteo` no menciona a ningún rol |
+| `/config dm-optout <rol>` | `dmOptoutRoleId` | opcional: nadie puede excluirse de `/dm` |
+| `/config servidor <europe\|americas\|asia>` | `albionServer` | por defecto `europe` |
+| `/config gremio <nombre>` | `albionGuild` | `/getkills` no funciona |
+| `/config albionbb <id>` | `albionbbGuildId` | `/attendance` no funciona |
+| `/config reset <campo>` | — | vuelve el campo a su valor por defecto |
+
+- `/config gremio` acepta **un solo** gremio, el principal. Los demás se siguen
+  como squads de gremio: `/squads create name:<gremio> is-guild:true`.
+- Cada cambio se valida antes de guardarse: el canal de logs tiene que ser de
+  texto y el bot tiene que poder escribir en él; el id de albionbb se comprueba
+  contra albionbb en el servidor configurado (acepta también la URL de la
+  página del gremio).
+- Cada cambio queda registrado en el canal de logs, con el antes y el después.
+
+Un comando al que le falta configuración no da "error inesperado": dice qué
+falta y con qué `/config` se arregla.
 
 ### Migración desde la versión de un solo servidor
 

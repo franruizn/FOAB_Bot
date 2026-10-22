@@ -7,12 +7,14 @@ const ERROR_COLOR = 0xed4245;
 /**
  * Envía al canal de logs del servidor `guildId` (logChannelId de su
  * config.json). Sin servidor (un DM) o sin canal configurado, no hace nada.
+ * `channelId` sustituye al configurado (para /config reset logs, que avisa
+ * en el canal que deja de serlo).
  */
-async function sendToLogChannel(client, guildId, embed, files = []) {
+async function sendToLogChannel(client, guildId, embed, files = [], { channelId: channelIdOverride } = {}) {
   if (!guildId) return;
 
   try {
-    const { logChannelId: channelId } = await getConfig(guildId);
+    const channelId = channelIdOverride ?? (await getConfig(guildId)).logChannelId;
     if (!channelId) return; // opcional: sin configurar, no hace nada
 
     const channel = await client.channels.fetch(channelId);
@@ -51,6 +53,29 @@ export async function notifySquadMutation(client, { guildId, actorTag, subcomman
     .setTimestamp(new Date());
 
   await sendToLogChannel(client, guildId, embed);
+}
+
+/**
+ * Notifica en el canal de logs del servidor (si está configurado) que /config
+ * cambió un campo de su config.json: quién, qué campo, y el antes y el
+ * después.
+ * @param {import('discord.js').Client} client
+ * @param {{ guildId: string, actorTag: string, actorId: string, label: string, before: string, after: string, logChannelId?: string }} params
+ *   logChannelId: canal al que enviarlo en vez del configurado
+ */
+export async function notifyConfigChange(client, { guildId, actorTag, actorId, label, before, after, logChannelId }) {
+  const embed = new EmbedBuilder()
+    .setColor(MUTATION_COLOR)
+    .setTitle('⚙️ /config cambió la configuración')
+    .addFields(
+      { name: 'Campo', value: label, inline: true },
+      { name: 'Administrador', value: `${actorTag} (<@${actorId}>)`, inline: true },
+      { name: 'Antes', value: before, inline: false },
+      { name: 'Ahora', value: after, inline: false },
+    )
+    .setTimestamp(new Date());
+
+  await sendToLogChannel(client, guildId, embed, [], { channelId: logChannelId });
 }
 
 /**

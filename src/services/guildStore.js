@@ -190,6 +190,18 @@ function validateChanges(cambios) {
  * @returns {Promise<ReturnType<typeof defaultConfig>>} la config resultante
  */
 export async function setConfig(guildId, cambios) {
+  return (await updateConfig(guildId, cambios)).config;
+}
+
+/**
+ * Como setConfig(), pero devuelve también la config de antes del cambio,
+ * leída bajo el mismo candado: el "antes" de un log no puede ser el de otra
+ * escritura que se colara entre medias.
+ * @param {string} guildId
+ * @param {Partial<ReturnType<typeof defaultConfig>>} cambios
+ * @returns {Promise<{ previous: ReturnType<typeof defaultConfig>, config: ReturnType<typeof defaultConfig> }>}
+ */
+export async function updateConfig(guildId, cambios) {
   assertGuildId(guildId);
   validateChanges(cambios);
   const filePath = rutaDe(guildId, 'config.json');
@@ -199,7 +211,7 @@ export async function setConfig(guildId, cambios) {
     const next = { ...current, ...cambios, version: CONFIG_VERSION, guildId };
     await atomicWriteJson(filePath, next);
     await cacheConfig(guildId, next);
-    return structuredClone(next);
+    return { previous: structuredClone(current), config: structuredClone(next) };
   });
 }
 
