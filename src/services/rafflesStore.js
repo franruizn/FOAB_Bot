@@ -6,8 +6,24 @@ import { rutaDe } from './guildStore.js';
 // escriba uno del B.
 
 /**
- * @typedef {{id: string, guildId: string, channelId: string, messageId: string, endsAt: number, creatorId: string, roleId?: string | null}} Raffle
+ * @typedef {{id: string, guildId: string, channelId: string, messageId: string, endsAt: number, creatorId: string, roleId?: string | null, winners: number, message?: string | null}} Raffle
  */
+
+export const MIN_WINNERS = 1;
+export const MAX_WINNERS = 20;
+
+/**
+ * Puestos de un sorteo, siempre dentro de MIN_WINNERS..MAX_WINNERS. Lo que
+ * viene de raffles.json no ha pasado por las validaciones del comando (un
+ * sorteo de antes de existir la opción no lo trae; uno editado a mano puede
+ * traer cualquier cosa), así que se acota al leer.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function normalizeWinners(value) {
+  if (!Number.isInteger(value)) return MIN_WINNERS;
+  return Math.min(Math.max(value, MIN_WINNERS), MAX_WINNERS);
+}
 
 /**
  * Lee los sorteos activos de un servidor. No requiere el candado: el
@@ -17,7 +33,8 @@ import { rutaDe } from './guildStore.js';
  * @returns {Promise<Raffle[]>}
  */
 export async function loadRaffles(guildId) {
-  return readJsonFile(rutaDe(guildId, 'raffles.json'), []);
+  const raffles = await readJsonFile(rutaDe(guildId, 'raffles.json'), []);
+  return raffles.map((raffle) => ({ ...raffle, winners: normalizeWinners(raffle.winners) }));
 }
 
 async function mutateRaffles(guildId, mutateFn) {

@@ -148,6 +148,26 @@ export async function notifyUncontrolledError(client, { guildId, commandName, ac
   );
 }
 
+/**
+ * Notifica en el canal de logs del servidor (si está configurado) que un sorteo se cerró sin
+ * poder publicar su resultado (canal borrado, permisos retirados, embed
+ * rechazado...). El sorteo ya se ha quitado de raffles.json: esto es lo
+ * único que queda de él.
+ * @param {import('discord.js').Client} client
+ * @param {{ guildId: string, channelId: string, creatorId: string, error: unknown }} params
+ */
+export async function notifyRaffleFailed(client, { guildId, channelId, creatorId, error }) {
+  const message = error instanceof Error ? error.message : String(error);
+  await sendToLogChannel(client, guildId, (lang) =>
+    new EmbedBuilder()
+      .setColor(ERROR_COLOR)
+      .setTitle(t('log.raffleFailed.title', lang))
+      .setDescription(t('log.raffleFailed.body', lang, { creator: creatorId, channel: channelId }))
+      .addFields({ name: t('log.field.message', lang), value: `\`\`\`${message.slice(0, 500)}\`\`\`` })
+      .setTimestamp(new Date()),
+  );
+}
+
 // Por encima de esto el texto de un /dm no cabe en la descripción de un
 // embed (4096) junto con el resto: se adjunta como fichero.
 const DM_LOG_TEXT_MAX_LENGTH = 4000;

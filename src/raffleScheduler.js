@@ -1,11 +1,15 @@
 import crypto from 'node:crypto';
 import { listarGuilds } from './services/guildStore.js';
-import { loadRaffles, removeRaffle } from './services/rafflesStore.js';
-import { buildRaffleResultsEmbed, buildNoParticipantsEmbed } from './ui/raffleEmbed.js';
+import { loadRaffles, removeRaffle, normalizeWinners } from './services/rafflesStore.js';
+import { buildRaffleResultsEmbed, buildNoParticipantsEmbed, buildRaffleWinnersContent } from './ui/raffleEmbed.js';
 import { t, guildLang } from './i18n.js';
+import { notifyRaffleFailed } from './logChannel.js';
 
 const RAFFLE_EMOJI = '🎉';
 const REACTORS_PAGE_LIMIT = 100;
+// Rondas de desempate antes de elegir al azar: sin tope, un empate que se
+// repite (improbable, pero posible) sería un bucle sin fin.
+const MAX_TIEBREAK_ROUNDS = 10;
 
 // guildId -> (raffleId -> Timeout). Indexado por servidor: cada uno tiene su
 // propio raffles.json y sus timers no se mezclan con los de otro. Solo vive
@@ -94,30 +98,84 @@ function rollParticipants(users) {
 }
 
 /**
- * Ordena por tirada descendente. Si hay empate en la tirada MÁS ALTA, tira
- * una segunda vez solo entre los empatados y usa esa segunda tirada para
- * desempatar el orden (el roll original se sigue mostrando en el embed, así
- * el empate queda visible; la nota de qué pasó se añade aparte).
- * @param {Array<{ user: unknown, roll: number }>} results
- * @returns {{ sorted: Array<{ user: unknown, roll: number, tiebreakRoll?: number }>, tiebreak: { roll: number, participants: unknown[] } | null }}
+ * Agrupa por `key` de mayor a menor. El orden dentro de cada grupo es el de
+ * entrada (sort estable).
+ * @template T
+ * @param {T[]} items
+ * @param {(item: T) => number} key
+ * @returns {T[][]}
  */
-function applyTiebreak(results) {
-  const maxRoll = Math.max(...results.map((r) => r.roll));
-  const tied = results.filter((r) => r.roll === maxRoll);
+function groupByDescending(items, key) {
+  const groups = [];
+  for (const item of [...items].sort((a, b) => key(b) - key(a))) {
+    const last = groups.at(-1);
+    if (last && key(last[0]) === key(item)) last.push(item);
+    else groups.push([item]);
+  }
+  return groups;
+}
 
-  let tiebreak = null;
-  if (tied.length > 1) {
-    for (const result of tied) {
-      result.tiebreakRoll = crypto.randomInt(1, 101);
+/**
+ * Reparte `slots` puestos de arriba abajo entre `entries`, ordenadas por
+ * `key`. Un grupo de empatados que cabe entero en lo que queda entra entero;
+ * el que NO cabe (como mucho uno: después ya no quedan puestos) se ordena con
+ * `breakTie(grupo, puestosQueQuedan)`. Devuelve el orden completo, con los
+ * ganadores delante.
+ */
+function fillSlots(entries, slots, key, breakTie) {
+  const ordered = [];
+  for (const group of groupByDescending(entries, key)) {
+    const remaining = Math.max(0, slots - ordered.length);
+    ordered.push(...(remaining > 0 && group.length > remaining ? breakTie(group, remaining) : group));
+  }
+  return ordered;
+}
+
+/**
+ * Ordena un grupo empatado que se disputa `slots` puestos: tira de nuevo
+ * solo entre ellos y reparte con la misma regla; si vuelven a empatar en el
+ * corte, otra ronda solo entre esos, hasta MAX_TIEBREAK_ROUNDS. Pasado el
+ * tope, baraja al azar a los que sigan empatados.
+ */
+function rankTied(entries, slots, round, state, randomInt) {
+  if (round > MAX_TIEBREAK_ROUNDS) {
+    state.random = true;
+    const shuffled = [...entries];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = randomInt(0, i + 1);
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
-    tiebreak = { roll: maxRoll, participants: tied };
+    return shuffled;
   }
 
-  const sorted = [...results].sort((a, b) => {
-    if (b.roll !== a.roll) return b.roll - a.roll;
-    return (b.tiebreakRoll ?? -1) - (a.tiebreakRoll ?? -1);
-  });
+  state.rounds = round;
+  const rolls = new Map(entries.map((entry) => [entry, randomInt(1, 101)]));
+  return fillSlots(entries, slots, (entry) => rolls.get(entry), (group, remaining) =>
+    rankTied(group, remaining, round + 1, state, randomInt),
+  );
+}
 
+/**
+ * Elige `slots` ganadores distintos entre `results` (cada uno con su tirada):
+ * de mayor a menor tirada, y un empate solo se rompe si decide quién entra
+ * (más empatados que puestos libres). El roll original se sigue mostrando en
+ * el embed; `tiebreak` dice entre quiénes y por cuántos puestos se desempató.
+ * Con un solo puesto es lo de siempre: solo un empate en la tirada más alta
+ * necesita desempate.
+ * @template {{ user: { id: string }, roll: number }} R
+ * @param {R[]} results
+ * @param {number} slots
+ * @param {(min: number, max: number) => number} [randomInt]
+ * @returns {{ sorted: R[], tiebreak: { roll: number, participants: R[], slots: number, rounds: number, random: boolean } | null }}
+ */
+export function pickWinners(results, slots, randomInt = crypto.randomInt) {
+  let tiebreak = null;
+  const sorted = fillSlots(results, slots, (result) => result.roll, (group, remaining) => {
+    const state = { rounds: 0, random: false };
+    const ranked = rankTied(group, remaining, 1, state, randomInt);
+    tiebreak = { roll: group[0].roll, participants: group, slots: remaining, ...state };
+    return ranked;
+  });
   return { sorted, tiebreak };
 }
 
@@ -126,28 +184,38 @@ function applyTiebreak(results) {
  * acumuladas en memoria), tira los dados, publica el resultado citando el
  * mensaje original, y quita el sorteo de raffles.json.
  *
+ * El sorteo sale de raffles.json SIEMPRE, también si publicar falla (canal
+ * borrado, permisos retirados, embed rechazado...): si se quedara, cada
+ * arranque lo reintentaría y volvería a fallar, para siempre y sin que nadie
+ * lo viera. El fallo queda en el log y, si lo hay, en el canal de logs del
+ * servidor.
+ *
  * `creatorId` se lee de `raffle.creatorId` (persistido en raffles.json) en
  * vez de recibirse aparte: pasarlo como parámetro suelto en cada llamada es
  * justo lo que causó el bug real (un `message` de discord.js acabó en su
  * sitio — y como Message.toString() devuelve message.content, el mensaje
  * final citaba el anuncio entero en vez de mencionar al creador).
  * @param {import('discord.js').Client} client
- * @param {{ id: string, guildId: string, channelId: string, messageId: string, creatorId: string, roleId?: string | null }} raffle
+ * @param {{ id: string, guildId: string, channelId: string, messageId: string, creatorId: string, roleId?: string | null, winners?: number, message?: string | null }} raffle
  * @param {{ delayed?: boolean }} [options]
  */
 export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
   clearActiveTimer(raffle.guildId, raffle.id);
+  try {
+    await publishRaffleResult(client, raffle, { delayed });
+  } catch (error) {
+    console.error(`[raffle] No se pudo publicar el resultado del sorteo ${raffle.id}; se cierra igualmente:`, error?.stack ?? error);
+    await notifyRaffleFailed(client, { guildId: raffle.guildId, channelId: raffle.channelId, creatorId: raffle.creatorId, error });
+  } finally {
+    await removeRaffle(raffle.guildId, raffle.id);
+  }
+}
+
+async function publishRaffleResult(client, raffle, { delayed }) {
   // Todo lo que se publica al resolver lo lee el canal: idioma del servidor.
   const lang = await guildLang(raffle.guildId).catch(() => undefined);
-
-  let channel;
-  try {
-    channel = await client.channels.fetch(raffle.channelId);
-  } catch (error) {
-    console.error(`[raffle] No se pudo obtener el canal ${raffle.channelId} del sorteo ${raffle.id}:`, error?.stack ?? error);
-    await removeRaffle(raffle.guildId, raffle.id);
-    return;
-  }
+  // Si el canal ya no existe, lanza: es un resultado que no se pudo publicar.
+  const channel = await client.channels.fetch(raffle.channelId);
 
   let message;
   try {
@@ -157,7 +225,6 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
     await channel.send(t('raffle.messageDeleted', lang)).catch((sendError) => {
       console.error('[raffle] Tampoco se pudo avisar en el canal:', sendError?.stack ?? sendError);
     });
-    await removeRaffle(raffle.guildId, raffle.id);
     return;
   }
 
@@ -179,21 +246,28 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
       embeds: [buildNoParticipantsEmbed({ delayed, totalReactors: reactors.length, roleMissing, lang })],
       reply,
     });
-    await removeRaffle(raffle.guildId, raffle.id);
     return;
   }
 
-  const { sorted, tiebreak } = applyTiebreak(rollParticipants(participants));
-  const winner = sorted[0];
-  const embed = buildRaffleResultsEmbed({ results: sorted, delayed, tiebreak, totalReactors: reactors.length, lang });
-  await channel.send({
-    content: t('raffle.winnerLine', lang, { winner: winner.user.id, creator: raffle.creatorId }),
-    embeds: [embed],
-    reply,
+  // Un sorteo anterior a `winners` no lo trae; uno editado a mano puede traer
+  // cualquier cosa: siempre se acota a 1-20.
+  const slots = normalizeWinners(raffle.winners);
+  const { sorted, tiebreak } = pickWinners(rollParticipants(participants), slots);
+  const embed = buildRaffleResultsEmbed({
+    results: sorted,
+    delayed,
+    tiebreak,
+    totalReactors: reactors.length,
+    winners: slots,
+    message: raffle.message ?? null,
+    lang,
   });
-
-  await removeRaffle(raffle.guildId, raffle.id);
-
+  const content = buildRaffleWinnersContent({
+    winnerIds: sorted.slice(0, slots).map((result) => result.user.id),
+    creatorId: raffle.creatorId,
+    lang,
+  });
+  await channel.send({ content, embeds: [embed], reply });
 }
 
 /**

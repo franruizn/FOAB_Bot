@@ -7,7 +7,7 @@ import os from 'node:os';
 const DATA_DIR = await mkdtemp(path.join(os.tmpdir(), 'raffle-scheduler-test-'));
 process.env.DATA_DIR = DATA_DIR;
 
-const { resolveRaffle, scheduleRaffleResolution, initializeRaffles } = await import('./raffleScheduler.js');
+const { resolveRaffle, scheduleRaffleResolution, initializeRaffles, pickWinners } = await import('./raffleScheduler.js');
 const { loadRaffles, addRaffle } = await import('./services/rafflesStore.js');
 const { setConfig } = await import('./services/guildStore.js');
 // Servidor por defecto de los sorteos sin rol (los de rol traen el suyo).
@@ -447,4 +447,154 @@ test('initializeRaffles(): un sorteo con rol reanudado tras un reinicio sigue fi
 
   const content = lastContent(channel);
   assert.match(content, /^<@p1> ha ganado el sorteo de <@creator-6>$/, 'p2 no tiene el rol y no debe poder ganar tras el reinicio');
+});
+
+// ============================================================
+// pickWinners(): reparto de puestos y desempates
+// ============================================================
+
+// Tiradas guionizadas: devuelve `values` en orden y falla si se piden más
+// (así un test también comprueba que NO se tiró cuando no tocaba).
+function scriptedRandom(values) {
+  const queue = [...values];
+  const fn = (min, max) => {
+    assert.ok(queue.length > 0, `tirada inesperada (${min}-${max})`);
+    return queue.shift();
+  };
+  fn.left = () => queue.length;
+  return fn;
+}
+
+const rolled = (rolls) => Object.entries(rolls).map(([id, roll]) => ({ user: { id }, roll }));
+const ids = (results) => results.map((r) => r.user.id);
+
+test('pickWinners(): un empate que cabe entero en los puestos libres no se rompe', () => {
+  const random = scriptedRandom([]);
+  const { sorted, tiebreak } = pickWinners(rolled({ p1: 90, p2: 90, p3: 90, p4: 50 }), 3, random);
+  assert.deepEqual(ids(sorted.slice(0, 3)), ['p1', 'p2', 'p3']);
+  assert.equal(tiebreak, null);
+});
+
+test('pickWinners(): un empate más grande que los puestos que quedan se desempata solo entre esos', () => {
+  // p1 entra solo; p2/p3/p4 se disputan el último puesto; p5 no tira.
+  const random = scriptedRandom([20, 80, 50]);
+  const { sorted, tiebreak } = pickWinners(rolled({ p1: 90, p2: 70, p3: 70, p4: 70, p5: 10 }), 2, random);
+  assert.deepEqual(ids(sorted), ['p1', 'p3', 'p4', 'p2', 'p5']);
+  assert.equal(tiebreak.roll, 70);
+  assert.equal(tiebreak.slots, 1);
+  assert.equal(tiebreak.rounds, 1);
+  assert.equal(tiebreak.random, false);
+  assert.deepEqual(ids(tiebreak.participants), ['p2', 'p3', 'p4']);
+  assert.equal(sorted[0].roll, 90, 'el roll original no cambia');
+});
+
+test('pickWinners(): si la segunda tirada vuelve a empatar en el corte, otra ronda solo entre esos', () => {
+  // Ronda 1: p1 y p2 empatan a 90 por 1 puesto (p3 queda fuera). Ronda 2: solo ellos.
+  const random = scriptedRandom([90, 90, 10, 30, 60]);
+  const { sorted, tiebreak } = pickWinners(rolled({ p1: 50, p2: 50, p3: 50 }), 1, random);
+  assert.equal(sorted[0].user.id, 'p2');
+  assert.equal(tiebreak.rounds, 2);
+  assert.equal(random.left(), 0);
+});
+
+test('pickWinners(): un empate en la segunda tirada que cabe entero no pide otra ronda', () => {
+  const random = scriptedRandom([80, 80, 10]);
+  const { sorted, tiebreak } = pickWinners(rolled({ p1: 50, p2: 50, p3: 50 }), 2, random);
+  assert.deepEqual(ids(sorted.slice(0, 2)).sort(), ['p1', 'p2']);
+  assert.equal(tiebreak.slots, 2);
+  assert.equal(tiebreak.rounds, 1);
+});
+
+test('pickWinners(): tras 10 rondas empatados, se elige al azar (sin bucle infinito)', () => {
+  let calls = 0;
+  const alwaysTie = (min) => {
+    calls++;
+    return min; // 1 en cada tirada; 0 en la baraja final
+  };
+  const { sorted, tiebreak } = pickWinners(rolled({ p1: 40, p2: 40 }), 1, alwaysTie);
+  assert.equal(tiebreak.rounds, 10);
+  assert.equal(tiebreak.random, true);
+  assert.equal(calls, 10 * 2 + 1, '10 rondas de 2 tiradas y una elección al azar');
+  assert.equal(new Set(ids(sorted)).size, 2);
+});
+
+test('pickWinners(): con menos participantes que puestos, ganan todos y no hay desempate', () => {
+  const { sorted, tiebreak } = pickWinners(rolled({ p1: 30, p2: 30 }), 3, scriptedRandom([]));
+  assert.deepEqual(ids(sorted), ['p1', 'p2']);
+  assert.equal(tiebreak, null);
+});
+
+test('pickWinners(): con un puesto, un empate por debajo del primero no se desempata (como siempre)', () => {
+  const { sorted, tiebreak } = pickWinners(rolled({ p1: 99, p2: 40, p3: 40 }), 1, scriptedRandom([]));
+  assert.equal(sorted[0].user.id, 'p1');
+  assert.equal(tiebreak, null);
+});
+
+test('pickWinners(): con muchos empates, nadie gana dos veces y ningún ganador tiene menos tirada que un no ganador', () => {
+  for (let run = 0; run < 300; run++) {
+    const results = Array.from({ length: 30 }, (_, i) => ({ user: { id: `p${i}` }, roll: 1 + (run * 7 + i * 13) % 12 }));
+    const { sorted } = pickWinners(results, 20);
+    const winners = sorted.slice(0, 20);
+    assert.equal(sorted.length, 30);
+    assert.equal(new Set(ids(winners)).size, 20);
+    const minWinner = Math.min(...winners.map((r) => r.roll));
+    const maxLoser = Math.max(...sorted.slice(20).map((r) => r.roll));
+    assert.ok(minWinner >= maxLoser, `run ${run}: ${minWinner} < ${maxLoser}`);
+  }
+});
+
+// ============================================================
+// resolveRaffle(): varios ganadores y mensaje
+// ============================================================
+
+test('resolveRaffle(): 3 puestos y 2 participantes, ganan los dos y el embed lo dice; el mensaje sale en un field', async () => {
+  const CHANNEL_ID = 'channel-multi-1';
+  const channel = new FakeChannel(CHANNEL_ID);
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]));
+  const announcement = new FakeMessage('msg-multi-1', 'anuncio');
+  announcement.addReaction('🎉', [new FakeUser('p1'), new FakeUser('p2')]);
+  channel.store.set(announcement.id, announcement);
+
+  const raffle = {
+    id: 'raffle-multi-1',
+    guildId: DEFAULT_GUILD_ID,
+    channelId: CHANNEL_ID,
+    messageId: announcement.id,
+    creatorId: 'creator-m',
+    winners: 3,
+    message: 'Premio: **montura T8**',
+  };
+  await resolveRaffle(client, raffle);
+
+  assert.match(lastContent(channel), /^<@p[12]> y <@p[12]> han ganado el sorteo de <@creator-m>$/);
+  const embed = lastEmbed(channel);
+  assert.match(embed.description, /^🏆 \*\*2 ganadores\*\*\n🥇 <@p\d> — `\d+`\n🥈 <@p\d> — `\d+`/);
+  assert.match(embed.description, /3 ganadores de 2 participantes: ganan todos\./);
+  assert.deepEqual(embed.fields[0], { name: 'Mensaje', value: 'Premio: **montura T8**' });
+});
+
+test('resolveRaffle(): un sorteo reanudado conserva sus ganadores y su mensaje', async () => {
+  const CHANNEL_ID = 'channel-multi-2';
+  const channel = new FakeChannel(CHANNEL_ID);
+  const client = makeFakeClient(new Map([[CHANNEL_ID, channel]]));
+  const announcement = new FakeMessage('msg-multi-2', 'anuncio');
+  announcement.addReaction('🎉', ['p1', 'p2', 'p3', 'p4'].map((id) => new FakeUser(id)));
+  channel.store.set(announcement.id, announcement);
+
+  await addRaffle({
+    id: 'raffle-multi-2',
+    guildId: DEFAULT_GUILD_ID,
+    channelId: CHANNEL_ID,
+    messageId: announcement.id,
+    endsAt: Date.now() - 1000,
+    creatorId: 'creator-m',
+    winners: 2,
+    message: 'Sorteo de la semana',
+  });
+  await initializeRaffles(client);
+
+  const embed = lastEmbed(channel);
+  assert.match(embed.description, /^🏆 \*\*2 ganadores\*\*/);
+  assert.equal(embed.fields[0].value, 'Sorteo de la semana');
+  assert.match(lastContent(channel), / y .* han ganado el sorteo de <@creator-m>$/);
 });

@@ -1,0 +1,392 @@
+{
+  "announce.plain": {
+    "replies": [
+      {
+        "content": "Sorteo creado.",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": null
+      }
+    ],
+    "sent": [
+      {
+        "content": "<@creator-1> ha comenzado un sorteo que terminará <t:1793730600:R>.\n\nReacciona con 🎉 para participar.",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": {
+          "roles": []
+        }
+      }
+    ]
+  },
+  "announce.raffleRole": {
+    "replies": [
+      {
+        "content": "Sorteo creado.",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": null
+      }
+    ],
+    "sent": [
+      {
+        "content": "<@&raffle-role> <@creator-1> ha comenzado un sorteo que terminará <t:1793730600:R>.\n\nReacciona con 🎉 para participar.",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": {
+          "roles": [
+            "raffle-role"
+          ]
+        }
+      }
+    ]
+  },
+  "announce.restricted": {
+    "replies": [
+      {
+        "content": "Sorteo creado.",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": null
+      }
+    ],
+    "sent": [
+      {
+        "content": "<@&party-role> <@creator-1> ha comenzado un sorteo que terminará <t:1793730600:R>.\n\nReacciona con 🎉 para participar (solo miembros de <@&party-role>).",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": {
+          "roles": [
+            "party-role"
+          ]
+        }
+      }
+    ]
+  },
+  "announce.en": {
+    "replies": [
+      {
+        "content": "Raffle created.",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": null
+      }
+    ],
+    "sent": [
+      {
+        "content": "<@creator-1> started a raffle that ends <t:1793730600:R>.\n\nReact with 🎉 to join.",
+        "embeds": [],
+        "reply": null,
+        "allowedMentions": {
+          "roles": []
+        }
+      }
+    ]
+  },
+  "result.distinct": {
+    "sent": [
+      {
+        "content": "<@p2> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p2> con una tirada de 90!**",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p2> — `90`\n🥈 **2.** <@p4> — `70`\n **3.** <@p1> — `40`\n **4.** <@p3> — `10`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.distinct-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.topTie": {
+    "sent": [
+      {
+        "content": "<@p2> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p2> con una tirada de 80!**\n\n⚖️ Empate a **80** entre 2 participantes, resuelto con una segunda tirada.",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p2> — `80`\n🥈 **2.** <@p1> — `80`\n **3.** <@p3> — `20`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.topTie-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.topTieTwice": {
+    "sent": [
+      {
+        "content": "<@p2> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p2> con una tirada de 80!**\n\n⚖️ Empate a **80** entre 2 participantes, resuelto tras 2 rondas de desempate.",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p2> — `80`\n🥈 **2.** <@p1> — `80`\n **3.** <@p3> — `20`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.topTieTwice-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.topTieRandom": {
+    "sent": [
+      {
+        "content": "<@p2> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p2> con una tirada de 80!**\n\n⚖️ Empate a **80** entre 2 participantes: tras 10 rondas de desempate seguían empatados y el ganador se eligió al azar.",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p2> — `80`\n🥈 **2.** <@p1> — `80`\n **3.** <@p3> — `20`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.topTieRandom-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.lowerTie": {
+    "sent": [
+      {
+        "content": "<@p1> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p1> con una tirada de 99!**",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p1> — `99`\n🥈 **2.** <@p2> — `40`\n **3.** <@p3> — `40`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.lowerTie-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.many": {
+    "sent": [
+      {
+        "content": "<@p7> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p7> con una tirada de 65!**",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p7> — `65`\n🥈 **2.** <@p6> — `55`\n **3.** <@p5> — `45`\n **4.** <@p4> — `35`\n **5.** <@p3> — `25`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100 · 7 participantes"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.many-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.single": {
+    "sent": [
+      {
+        "content": "<@p1> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p1> con una tirada de 42!**\n\nÚnico participante.",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p1> — `42`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.single-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.nobody": {
+    "sent": [
+      {
+        "content": null,
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "Nadie participó."
+          }
+        ],
+        "reply": {
+          "messageReference": "result.nobody-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.delayed": {
+    "sent": [
+      {
+        "content": "<@p2> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p2> con una tirada de 34!**\n\n⏱️ Este sorteo se resolvió con retraso porque el bot estuvo caído al cumplirse el plazo.",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p2> — `34`\n🥈 **2.** <@p1> — `12`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.delayed-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.en": {
+    "sent": [
+      {
+        "content": "<@p1> won <@creator-1>'s raffle",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Raffle results 🎲",
+            "description": "🥇 **Winner: <@p1> with a roll of 77!**",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p1> — `77`\n🥈 **2.** <@p2> — `33`"
+              }
+            ],
+            "footer": {
+              "text": "Rolls 1–100"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.en-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.roleFilter": {
+    "sent": [
+      {
+        "content": "<@p3> ha ganado el sorteo de <@creator-1>",
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "🥇 **Ganador: <@p3> con una tirada de 66!**",
+            "fields": [
+              {
+                "name": "ROLLS",
+                "value": "🥇 **1.** <@p3> — `66`\n🥈 **2.** <@p1> — `55`"
+              }
+            ],
+            "footer": {
+              "text": "Tiradas 1–100 · 2 de 3 participantes válidos"
+            }
+          }
+        ],
+        "reply": {
+          "messageReference": "result.roleFilter-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  },
+  "result.roleFilterNobody": {
+    "sent": [
+      {
+        "content": null,
+        "embeds": [
+          {
+            "color": 65437,
+            "title": "🎲 Resultados del sorteo 🎲",
+            "description": "1 persona reaccionó, pero no tenía el rol requerido para participar."
+          }
+        ],
+        "reply": {
+          "messageReference": "result.roleFilterNobody-announcement"
+        },
+        "allowedMentions": null
+      }
+    ]
+  }
+}
