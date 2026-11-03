@@ -54,7 +54,7 @@ test('errores de configuración del registro', () => {
 
 // --- con los comandos reales: lo que de verdad se registra ---
 
-const REAL_MODULES = ['getkills', 'squads', 'attendance', 'health', 'sorteo', 'crearRol', 'config'];
+const REAL_MODULES = ['getkills', 'squads', 'attendance', 'health', 'sorteo', 'raffleCancel', 'crearRol', 'config'];
 const realCommands = await Promise.all(REAL_MODULES.map(async (name) => (await import(`./commands/${name}.js`)).data));
 const { data: realDm } = await import('./commands/dm.js');
 const realPlan = planDeploy({ scope: 'global', commands: realCommands, dmCommand: realDm, env: { DM_GUILD_ID: OWNER } });

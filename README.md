@@ -122,6 +122,7 @@ nombre y la descripción del idioma del **cliente** de cada usuario
 | `/getkills` | `/getkills` |
 | `/attendance player days` | `/asistencia jugador dias` |
 | `/raffle minutes winners message role` | `/sorteo minutos ganadores mensaje rol` |
+| `/raffle-cancel` | `/cancelar-sorteo` |
 | `/create-role name list` | `/crear-rol nombre lista` |
 | `/health` | `/estado` |
 | `/dm role list` | `/dm rol lista` |

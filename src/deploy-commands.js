@@ -6,6 +6,7 @@ import { data as attendanceCommand } from './commands/attendance.js';
 import { data as healthCommand } from './commands/health.js';
 import { data as sorteoCommand } from './commands/sorteo.js';
 import { data as crearRolCommand } from './commands/crearRol.js';
+import { data as raffleCancelCommand } from './commands/raffleCancel.js';
 import { data as dmCommand } from './commands/dm.js';
 import { data as configCommand } from './commands/config.js';
 import { planDeploy } from './deployPlan.js';
@@ -24,7 +25,7 @@ if (!DISCORD_TOKEN || !CLIENT_ID) {
 
 const { steps, warnings } = planDeploy({
   scope: DEPLOY_SCOPE,
-  commands: [getkillsCommand, squadsCommand, attendanceCommand, healthCommand, sorteoCommand, crearRolCommand, configCommand],
+  commands: [getkillsCommand, squadsCommand, attendanceCommand, healthCommand, sorteoCommand, raffleCancelCommand, crearRolCommand, configCommand],
   dmCommand,
   env: process.env,
 });

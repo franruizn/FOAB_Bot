@@ -31,12 +31,25 @@ export class FakeMessage {
   constructor(id, content = '') {
     this.id = id;
     this.content = content;
-    this.reactions = { cache: new Map() };
+    this.edits = [];
+    const cache = new Map();
+    this.reactions = {
+      cache,
+      removeAll: async () => {
+        cache.clear();
+      },
+    };
   }
+  // count/me como en discord.js: la reacción del propio bot cuenta y es "me".
   addReaction(emoji, users) {
-    this.reactions.cache.set(emoji, { users: new FakeReactionUsers(users) });
+    this.reactions.cache.set(emoji, { users: new FakeReactionUsers(users), count: users.length + 1, me: true });
   }
   async react() {}
+  async edit(payload) {
+    this.edits.push(payload);
+    if (payload.content !== undefined) this.content = payload.content;
+    return this;
+  }
 }
 
 export class FakeChannel {

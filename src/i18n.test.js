@@ -20,7 +20,7 @@ const SRC_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // --- el árbol de comandos: lo que Discord rechazaría al registrar ---
 
-const COMMAND_MODULES = ['getkills', 'squads', 'attendance', 'health', 'sorteo', 'crearRol', 'dm', 'config'];
+const COMMAND_MODULES = ['getkills', 'squads', 'attendance', 'health', 'sorteo', 'raffleCancel', 'crearRol', 'dm', 'config'];
 const commands = await Promise.all(
   COMMAND_MODULES.map(async (name) => (await import(`./commands/${name}.js`)).data.toJSON()),
 );
@@ -92,10 +92,11 @@ test('no hay nombres de comando duplicados en ningún idioma, ni de opción dent
 
 test('nombres canónicos en inglés; /squads y /config sin traducir el nombre, el resto traducidos', () => {
   const byName = Object.fromEntries(commands.map((command) => [command.name, command]));
-  assert.deepEqual(Object.keys(byName).sort(), ['attendance', 'config', 'create-role', 'dm', 'getkills', 'health', 'raffle', 'squads']);
+  assert.deepEqual(Object.keys(byName).sort(), ['attendance', 'config', 'create-role', 'dm', 'getkills', 'health', 'raffle', 'raffle-cancel', 'squads']);
 
   const es = (name) => byName[name].name_localizations?.['es-ES'];
   assert.equal(es('raffle'), 'sorteo');
+  assert.equal(es('raffle-cancel'), 'cancelar-sorteo');
   assert.equal(es('create-role'), 'crear-rol');
   assert.equal(es('attendance'), 'asistencia');
   assert.equal(es('health'), 'estado');

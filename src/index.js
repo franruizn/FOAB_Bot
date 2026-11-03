@@ -6,6 +6,7 @@ import * as attendance from './commands/attendance.js';
 import * as health from './commands/health.js';
 import * as sorteo from './commands/sorteo.js';
 import * as crearRol from './commands/crearRol.js';
+import * as raffleCancel from './commands/raffleCancel.js';
 import * as dm from './commands/dm.js';
 import * as config from './commands/config.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
@@ -58,7 +59,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, health, sorteo, crearRol, dm, config]) {
+for (const command of [getkills, squads, attendance, health, sorteo, raffleCancel, crearRol, dm, config]) {
   client.commands.set(command.data.name, command);
 }
 

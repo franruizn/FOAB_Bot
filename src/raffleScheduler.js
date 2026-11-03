@@ -201,6 +201,8 @@ export function pickWinners(results, slots, randomInt = crypto.randomInt) {
  */
 export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
   clearActiveTimer(raffle.guildId, raffle.id);
+  const key = raffleKey(raffle.guildId, raffle.id);
+  resolving.add(key);
   try {
     await publishRaffleResult(client, raffle, { delayed });
   } catch (error) {
@@ -208,7 +210,34 @@ export async function resolveRaffle(client, raffle, { delayed = false } = {}) {
     await notifyRaffleFailed(client, { guildId: raffle.guildId, channelId: raffle.channelId, creatorId: raffle.creatorId, error });
   } finally {
     await removeRaffle(raffle.guildId, raffle.id);
+    resolving.delete(key);
   }
+}
+
+// Sorteos con la resolución ya en marcha (leyendo reacciones, publicando):
+// a esos ya no se les puede cancelar, o se publicaría un ganador de un
+// sorteo que el canal acaba de ver cancelado.
+const resolving = new Set();
+const raffleKey = (guildId, raffleId) => `${guildId}:${raffleId}`;
+
+/**
+ * Cancela un sorteo activo: no se sortea nada. El temporizador se cancela
+ * con clearTimeout ANTES de cualquier await (si solo se quitara de
+ * raffles.json, el temporizador seguiría vivo y lo resolvería igualmente al
+ * vencer) y después sale del fichero.
+ * @param {string} guildId
+ * @param {string} raffleId
+ * @returns {Promise<'cancelled' | 'gone' | 'resolving'>}
+ *   gone: ya no estaba (terminó o lo canceló otra persona);
+ *   resolving: se está resolviendo en este momento y no se toca.
+ */
+export async function cancelRaffle(guildId, raffleId) {
+  if (resolving.has(raffleKey(guildId, raffleId))) return 'resolving';
+  clearActiveTimer(guildId, raffleId);
+  const stored = await loadRaffles(guildId);
+  if (!stored.some((raffle) => raffle.id === raffleId)) return 'gone';
+  await removeRaffle(guildId, raffleId);
+  return 'cancelled';
 }
 
 async function publishRaffleResult(client, raffle, { delayed }) {
