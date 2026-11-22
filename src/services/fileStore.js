@@ -11,6 +11,12 @@ import path from 'node:path';
 
 const BACKUP_DIR_NAME = 'backups';
 const MAX_BACKUPS = 10;
+// Esperas entre reintentos de rename en Windows (ver renameWithRetry).
+const RENAME_RETRY_DELAYS_MS = [20, 50, 100];
+// El setTimeout real, guardado al cargar: la espera de un reintento no puede
+// depender de un reloj simulado por un test.
+const nativeSetTimeout = globalThis.setTimeout;
+const sleep = (ms) => new Promise((resolve) => nativeSetTimeout(resolve, ms));
 
 /** @type {Map<string, Promise<void>>} ruta absoluta -> cola de ese fichero */
 const fileTails = new Map();
@@ -69,6 +75,26 @@ export async function readJsonFile(filePath, defaultValue) {
 }
 
 /**
+ * rename() con reintentos ante EPERM, solo en Windows: ahí falla si otro
+ * proceso o lector tiene el destino abierto en ese instante, y se resuelve
+ * solo en milisegundos. En Linux es un rename normal.
+ * @param {string} from
+ * @param {string} to
+ * @param {{ platform?: string, renameFn?: typeof rename, wait?: (ms: number) => Promise<void> }} [options] - para tests
+ */
+export async function renameWithRetry(from, to, { platform = process.platform, renameFn = rename, wait = sleep } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await renameFn(from, to);
+      return;
+    } catch (error) {
+      if (platform !== 'win32' || error.code !== 'EPERM' || attempt >= RENAME_RETRY_DELAYS_MS.length) throw error;
+      await wait(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+/**
  * Copia el fichero actual a <su carpeta>/backups/<prefix>-<timestamp>.json antes
  * de sobrescribirlo, y conserva solo las últimas MAX_BACKUPS copias con ese
  * prefijo (no toca backups de otros stores que compartan el directorio). No
@@ -92,7 +118,7 @@ export async function backupCurrentFile(filePath, backupPrefix) {
   // válido. Nombre fijo por prefijo (van bajo el candado): el siguiente lo pisa.
   const tmpPath = path.join(backupDir, `${backupPrefix}.tmp`);
   await copyFile(filePath, tmpPath);
-  await rename(tmpPath, path.join(backupDir, `${backupPrefix}-${timestamp}.json`));
+  await renameWithRetry(tmpPath, path.join(backupDir, `${backupPrefix}-${timestamp}.json`));
 
   const entries = (await readdir(backupDir))
     .filter((name) => name.startsWith(`${backupPrefix}-`) && name.endsWith('.json'))
@@ -114,5 +140,5 @@ export async function atomicWriteJson(filePath, data) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp`;
   await writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf8');
-  await rename(tmpPath, filePath);
+  await renameWithRetry(tmpPath, filePath);
 }
