@@ -87,7 +87,12 @@ export async function backupCurrentFile(filePath, backupPrefix) {
   await mkdir(backupDir, { recursive: true });
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  await copyFile(filePath, path.join(backupDir, `${backupPrefix}-${timestamp}.json`));
+  // A un temporal y luego rename, como el fichero principal: un proceso muerto
+  // a mitad de la copia deja el temporal cortado, nunca un backup con nombre
+  // válido. Nombre fijo por prefijo (van bajo el candado): el siguiente lo pisa.
+  const tmpPath = path.join(backupDir, `${backupPrefix}.tmp`);
+  await copyFile(filePath, tmpPath);
+  await rename(tmpPath, path.join(backupDir, `${backupPrefix}-${timestamp}.json`));
 
   const entries = (await readdir(backupDir))
     .filter((name) => name.startsWith(`${backupPrefix}-`) && name.endsWith('.json'))

@@ -508,9 +508,9 @@ test('concurrencia: dos add simultáneos quedan los dos', async () => {
   assert.equal(new Set(ids).size, 2);
 });
 
-test('escritura: matar el proceso a mitad deja strikes.json válido y un backup legible', async () => {
+test('escritura: matar el proceso a mitad deja strikes.json y todos los backups legibles', async () => {
   const writer = fileURLToPath(new URL('./__fixtures__/strikeWriter.js', import.meta.url));
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 6; round++) {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'strikes-kill-'));
     const guildId = '920000000000000001';
     const child = spawn(process.execPath, [writer, guildId], {
@@ -522,7 +522,7 @@ test('escritura: matar el proceso a mitad deja strikes.json válido y un backup 
       child.once('exit', () => reject(new Error('el escritor terminó antes de tiempo')));
     });
     child.removeAllListeners('exit');
-    await new Promise((resolve) => setTimeout(resolve, 40 + round * 35));
+    await new Promise((resolve) => setTimeout(resolve, 30 + round * 20));
     const exited = new Promise((resolve) => child.once('exit', resolve));
     child.kill('SIGKILL');
     await exited;
@@ -531,20 +531,23 @@ test('escritura: matar el proceso a mitad deja strikes.json válido y un backup 
     const current = JSON.parse(await readFile(path.join(dir, 'strikes.json'), 'utf8'));
     assert.ok(current.strikes.length >= 3);
 
-    // S-4: el backup que se estaba copiando puede quedar cortado, así que se
-    // exige que haya alguno legible, no que lo sean todos.
-    const backups = (await readdir(path.join(dir, 'backups'))).filter((name) => name.startsWith('strikes-'));
-    const readable = [];
+    // Todos: un backup se lee justo el día que algo ha salido mal.
+    const backups = (await readdir(path.join(dir, 'backups'))).filter((name) => name.endsWith('.json'));
+    assert.ok(backups.length >= 1);
     for (const name of backups) {
-      try {
-        readable.push(JSON.parse(await readFile(path.join(dir, 'backups', name), 'utf8')));
-      } catch {
-        // cortado por el kill
-      }
+      const backup = JSON.parse(await readFile(path.join(dir, 'backups', name), 'utf8'));
+      assert.equal(backup.version, 1, name);
     }
-    assert.ok(readable.length >= 1);
     await rm(dataDir, { recursive: true, force: true, maxRetries: 5 });
   }
+});
+
+test('escritura: un backup no deja temporales y conserva solo los 10 últimos', async () => {
+  const g = await newGuild();
+  for (let n = 0; n < 14; n++) await seed(g);
+  const names = await readdir(rutaDe(g, 'backups'));
+  assert.ok(names.every((name) => name.endsWith('.json')), names.join(', '));
+  assert.ok(names.filter((name) => name.startsWith('strikes-')).length <= 10);
 });
 
 // --- informe semanal ---
