@@ -83,7 +83,7 @@ function clientDouble(guildIds = [], { failSend = false } = {}) {
 let nextInteraction = 1;
 
 /** Interacción de /strike. `roles` por defecto: oficial de ESE servidor. */
-function strike(guildId, sub, { target = user(TARGET), reason = null, actor = user(OFFICER), roles, click = null, member = {}, guild, client, failEdit = false } = {}) {
+function strike(guildId, sub, { target = user(TARGET), reason = null, actor = user(OFFICER), roles, click = null, member = {}, guild, client, failEdit = false, failButtonEdit = false } = {}) {
   const id = String(nextInteraction++);
   const replies = [];
   const collector = new EventEmitter();
@@ -98,7 +98,10 @@ function strike(guildId, sub, { target = user(TARGET), reason = null, actor = us
         user: actor,
         deferUpdate: async () => {},
         update: async (payload) => replies.push(payload),
-        editReply: async (payload) => replies.push(payload),
+        editReply: async (payload) => {
+          if (failButtonEdit) throw new Error('Unknown Webhook');
+          replies.push(payload);
+        },
       };
     },
   };
@@ -129,6 +132,16 @@ function strike(guildId, sub, { target = user(TARGET), reason = null, actor = us
       return message;
     },
   };
+}
+
+/** Los avisos a logs no se esperan: se comprueba que acaban llegando. */
+async function until(condition, ms = 2000) {
+  const start = performance.now();
+  while (performance.now() - start < ms) {
+    if (condition()) return true;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return false;
 }
 
 const lastEmbed = (i) => i.replies.at(-1).embeds[0].toJSON();
@@ -405,6 +418,7 @@ test('embeds: motivos de 200 caracteres que se duplican al escapar no desbordan'
   const add = strike(g, 'add', { reason, client });
   await execute(add);
   assertWithinEmbedLimits(lastEmbed(add));
+  assert.ok(await until(() => client.sent.length === 1));
   assertWithinEmbedLimits(client.sent[0].payload.embeds[0].toJSON());
 });
 
@@ -415,17 +429,47 @@ test('embeds: los avisos de add, remove y clear no notifican a nadie', async () 
   await execute(strike(g, 'add', { reason: 'b', client }));
   await execute(strike(g, 'remove', { client }));
   await execute(strike(g, 'clear', { click: 'confirm', client }));
-  assert.equal(client.sent.length, 4);
+  assert.ok(await until(() => client.sent.length === 4));
   for (const { payload } of client.sent) assert.deepEqual(payload.allowedMentions, NO_PINGS);
 });
 
-test('add: si falla la respuesta a Discord, el strike guardado queda en el canal de logs', { todo: 'S-3: el aviso va después de editReply' }, async () => {
-  const g = await newGuild();
-  const client = clientDouble([g]);
-  await assert.rejects(execute(strike(g, 'add', { reason: 'x', client, failEdit: true })));
-  assert.equal((await active(g)).length, 1);
-  assert.equal(client.sent.length, 1);
-});
+// Cada caso deja preparado un strike y dice cómo hacer fallar SU respuesta.
+const COMMITTED = [
+  ['add', { reason: 'x' }, 'failEdit', 1],
+  ['remove', {}, 'failEdit', 0],
+  ['clear', { click: 'confirm' }, 'failButtonEdit', 0],
+];
+
+for (const [sub, options, failure, activeAfter] of COMMITTED) {
+  test(`${sub}: si falla la respuesta, el cambio queda en logs y no se invita a repetirlo`, async (t) => {
+    const error = mock.method(console, 'error', () => {});
+    t.after(() => error.mock.restore());
+    const g = await newGuild();
+    if (sub !== 'add') await seed(g);
+    const client = clientDouble([g]);
+
+    // No lanza: el manejador general respondería "inténtalo de nuevo".
+    await execute(strike(g, sub, { ...options, client, [failure]: true }));
+
+    assert.equal((await active(g)).length, activeAfter);
+    assert.ok(await until(() => client.sent.length === 1), 'el aviso llega aunque falle la respuesta');
+  });
+
+  test(`${sub}: un canal de logs roto o colgado no impide responder al oficial`, async (t) => {
+    const error = mock.method(console, 'error', () => {});
+    t.after(() => error.mock.restore());
+    for (const fetch of [async () => { throw new Error('Unknown Channel'); }, () => new Promise(() => {})]) {
+      const g = await newGuild();
+      if (sub !== 'add') await seed(g);
+      const client = clientDouble([g]);
+      client.channels.fetch = fetch;
+      const i = strike(g, sub, { ...options, client });
+      await execute(i);
+      assert.equal((await active(g)).length, activeAfter);
+      assert.ok(lastEmbed(i).title, 'el oficial recibe su respuesta');
+    }
+  });
+}
 
 // --- concurrencia y escritura ---
 

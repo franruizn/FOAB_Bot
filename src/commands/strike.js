@@ -135,6 +135,31 @@ export async function execute(interaction) {
   }
 }
 
+/**
+ * Aviso al canal de logs sin esperarlo: un canal borrado o lento no puede
+ * retrasar ni tumbar la respuesta al oficial.
+ */
+function announce(client, params) {
+  notifyStrike(client, params).catch((error) => {
+    console.error('[strike] No se pudo avisar en el canal de logs:', error?.message ?? error);
+  });
+}
+
+/**
+ * Respuesta a un cambio YA guardado. Si falla no se propaga: el manejador
+ * general diría "error inesperado, inténtalo de nuevo", y reintentar aquí es
+ * poner el mismo strike dos veces. El rastro ya está en el canal de logs.
+ * @param {{ editReply: (payload: object) => Promise<unknown> }} responder
+ * @param {object} payload
+ */
+async function respondCommitted(responder, payload) {
+  try {
+    await responder.editReply(payload);
+  } catch (error) {
+    console.error('[strike] Cambio guardado, pero no se pudo responder al oficial:', error?.message ?? error);
+  }
+}
+
 const logBase = (interaction, target) => ({
   guildId: interaction.guildId,
   actorId: interaction.user.id,
@@ -151,7 +176,9 @@ async function handleAdd(interaction, target, reason, lang) {
     addedBy: interaction.user.id,
   });
 
-  await interaction.editReply({
+  announce(interaction.client, { ...logBase(interaction, target), action: 'add', reason: strike.reason, total: activeCount });
+
+  await respondCommitted(interaction, {
     embeds: [
       new EmbedBuilder()
         .setColor(strikeColor(activeCount))
@@ -165,8 +192,6 @@ async function handleAdd(interaction, target, reason, lang) {
     ],
     allowedMentions: NO_PINGS,
   });
-
-  await notifyStrike(interaction.client, { ...logBase(interaction, target), action: 'add', reason: strike.reason, total: activeCount });
 }
 
 async function handleRemove(interaction, target, reason, lang) {
@@ -184,6 +209,15 @@ async function handleRemove(interaction, target, reason, lang) {
     return;
   }
 
+  announce(interaction.client, {
+    ...logBase(interaction, target),
+    action: 'remove',
+    reason: strike.reason,
+    removedReason: reason,
+    addedAt: strike.addedAt,
+    total: activeCount,
+  });
+
   const lines = [
     t('strike.remove.body', lang, {
       user: target.id,
@@ -194,18 +228,9 @@ async function handleRemove(interaction, target, reason, lang) {
   if (reason) lines.push(t('strike.remove.why', lang, { reason: escapeMarkdown(reason) }));
   lines.push(tn('strike.remaining', activeCount, lang));
 
-  await interaction.editReply({
+  await respondCommitted(interaction, {
     embeds: [new EmbedBuilder().setColor(strikeColor(activeCount)).setTitle(t('strike.remove.title', lang)).setDescription(lines.join('\n\n'))],
     allowedMentions: NO_PINGS,
-  });
-
-  await notifyStrike(interaction.client, {
-    ...logBase(interaction, target),
-    action: 'remove',
-    reason: strike.reason,
-    removedReason: reason,
-    addedAt: strike.addedAt,
-    total: activeCount,
   });
 }
 
@@ -265,17 +290,17 @@ async function handleClear(interaction, target, lang) {
     return;
   }
 
+  announce(interaction.client, { ...logBase(interaction, target), action: 'clear', cleared, total: activeCount });
+
   const lines = [tn('strike.clear.done', cleared, lang, { user: target.id })];
   // Otro oficial puso uno mientras el botón estaba pendiente: ese no se ha visto.
   if (activeCount > 0) lines.push(tn('strike.remaining', activeCount, lang));
-  await button.editReply({
+  await respondCommitted(button, {
     content: null,
     embeds: [new EmbedBuilder().setColor(strikeColor(activeCount)).setTitle(t('strike.clear.title', lang)).setDescription(lines.join('\n\n'))],
     components: [],
     allowedMentions: NO_PINGS,
   });
-
-  await notifyStrike(interaction.client, { ...logBase(interaction, target), action: 'clear', cleared, total: activeCount });
 }
 
 async function handleCheck(interaction, target, lang) {

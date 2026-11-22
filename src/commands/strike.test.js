@@ -81,6 +81,16 @@ function interaction({ sub, target = user(TARGET), reason = null, roles = ['offi
   };
 }
 
+/** Los avisos a logs no se esperan: se comprueba que acaban llegando. */
+async function until(condition, ms = 2000) {
+  const start = performance.now();
+  while (performance.now() - start < ms) {
+    if (condition()) return true;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return false;
+}
+
 const lastEmbed = (i) => i.replies.at(-1).embeds[0].toJSON();
 
 before(async () => {
@@ -135,7 +145,7 @@ test('add guarda el evento con el formato pedido, responde con el total y avisa 
   assert.deepEqual([strike.removedAt, strike.removedBy, strike.removedReason], [null, null, null]);
   assert.match(lastEmbed(i).description, /\*\*1\*\* strike activo/);
   assert.deepEqual(i.replies.at(-1).allowedMentions, { parse: [] });
-  assert.equal(logSent.length, 1);
+  assert.ok(await until(() => logSent.length === 1));
   assert.deepEqual(logSent[0].allowedMentions, { parse: [] });
 });
 
@@ -156,7 +166,7 @@ test('remove quita el más reciente, conserva el evento y enseña el motivo orig
   assert.equal(strikes.find((s) => s.reason === 'primero').removedAt, null);
   assert.match(lastEmbed(i).description, /segundo/);
   assert.match(lastEmbed(i).description, /Le queda \*\*1\*\*/);
-  assert.equal(logSent.length, 1);
+  assert.ok(await until(() => logSent.length === 1));
 });
 
 test('remove sin strikes activos lo dice y no escribe ni avisa', async () => {
@@ -181,7 +191,7 @@ test('clear confirmado retira todos; sin pulsar o cancelando no toca nada', asyn
   await execute(i);
   assert.equal(activeStrikes(await loadStrikes(GUILD), TARGET).length, 0);
   assert.equal((await loadStrikes(GUILD)).length, 2);
-  assert.equal(logSent.length, 1);
+  assert.ok(await until(() => logSent.length === 1));
 });
 
 test('clear no perdona un strike puesto mientras se esperaba la confirmación', async () => {
