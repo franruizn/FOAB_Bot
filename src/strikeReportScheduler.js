@@ -1,7 +1,7 @@
 import { getConfig, listarGuilds } from './services/guildStore.js';
 import { loadStrikesFile, markReportSent, summarizeActive, countChanges } from './services/strikesStore.js';
 import { parseSchedule, slotsAround, overdueSlot } from './services/strikeReportSchedule.js';
-import { resolvePresent } from './services/memberPresence.js';
+import { resolvePresence } from './services/memberPresence.js';
 import { buildReportEmbeds } from './ui/strikesEmbed.js';
 import { notifyStrikeReport } from './logChannel.js';
 import { guildLang } from './i18n.js';
@@ -100,11 +100,11 @@ async function sendReport(client, guildId, { reportAt, lateSlot = null }) {
   try {
     const sinceMs = lastReportAt ? Date.parse(lastReportAt) : reportAt - FIRST_REPORT_WINDOW_MS;
     const rows = summarizeActive(strikes);
-    const present = await resolvePresent(client.guilds?.cache?.get(guildId), rows.map((row) => row.userId));
+    const { gone } = await resolvePresence(client.guilds?.cache?.get(guildId), rows.map((row) => row.userId));
     const lang = await guildLang(guildId);
     const embeds = buildReportEmbeds({
       rows,
-      present,
+      gone,
       changes: countChanges(strikes, sinceMs, reportAt),
       sinceMs,
       lateSlot,

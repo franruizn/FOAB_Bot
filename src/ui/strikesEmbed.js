@@ -20,7 +20,8 @@ export function strikeColor(count) {
 export const toUnix = (iso) => Math.floor(Date.parse(iso) / 1000);
 
 /**
- * Mención si sigue en el servidor; si se fue, el nombre guardado con la marca.
+ * Mención si sigue en el servidor o no se ha podido comprobar; solo quien se
+ * sabe que se fue sale con el nombre guardado y la marca.
  * @param {string} userId
  * @param {string | null} userName
  * @param {boolean} present
@@ -78,15 +79,15 @@ export function buildCheckEmbed({ who, pageText, count, removed, page, pageCount
 }
 
 /**
- * @param {{ rows: Array<{ userId: string, userName: string | null, count: number, latestAt: string }>, present: Set<string>, totalUsers: number, totalStrikes: number, page: number, pageCount: number, lang: string }} params
+ * @param {{ rows: Array<{ userId: string, userName: string | null, count: number, latestAt: string }>, gone: Set<string>, totalUsers: number, totalStrikes: number, page: number, pageCount: number, lang: string }} params
  */
-export function buildListEmbed({ rows, present, totalUsers, totalStrikes, page, pageCount, lang }) {
+export function buildListEmbed({ rows, gone, totalUsers, totalStrikes, page, pageCount, lang }) {
   if (totalUsers === 0) {
     return new EmbedBuilder().setColor(GREEN).setTitle(t('strike.list.title', lang)).setDescription(t('strike.list.empty', lang));
   }
   const lines = rows.map((row) =>
     tn('strike.list.line', row.count, lang, {
-      who: displayUser(row.userId, row.userName, present.has(row.userId), lang),
+      who: displayUser(row.userId, row.userName, !gone.has(row.userId), lang),
       when: toUnix(row.latestAt),
     }),
   );
@@ -106,10 +107,10 @@ export function buildListEmbed({ rows, present, totalUsers, totalStrikes, page, 
  * El informe semanal, en tantos embeds como haga falta: va sin botones, así
  * que todos los usuarios tienen que caber en mensajes consecutivos. Cada embed
  * va en su propio mensaje (el límite de 6000 caracteres es por mensaje).
- * @param {{ rows: Array<{ userId: string, userName: string | null, count: number, latestAt: string }>, present: Set<string>, changes: { added: number, removed: number }, sinceMs: number, lateSlot?: number | null, lang: string }} params
+ * @param {{ rows: Array<{ userId: string, userName: string | null, count: number, latestAt: string }>, gone: Set<string>, changes: { added: number, removed: number }, sinceMs: number, lateSlot?: number | null, lang: string }} params
  * @returns {EmbedBuilder[]}
  */
-export function buildReportEmbeds({ rows, present, changes, sinceMs, lateSlot = null, lang }) {
+export function buildReportEmbeds({ rows, gone, changes, sinceMs, lateSlot = null, lang }) {
   const intro = [];
   if (lateSlot !== null) intro.push(t('strikeReport.late', lang, { when: Math.floor(lateSlot / 1000) }));
   if (rows.length > 0) {
@@ -136,7 +137,7 @@ export function buildReportEmbeds({ rows, present, changes, sinceMs, lateSlot = 
   let separator = '\n\n';
   for (const row of rows) {
     const line = tn('strike.list.line', row.count, lang, {
-      who: displayUser(row.userId, row.userName, present.has(row.userId), lang),
+      who: displayUser(row.userId, row.userName, !gone.has(row.userId), lang),
       when: toUnix(row.latestAt),
     });
     if (current.length + separator.length + line.length > CHECK_PAGE_MAX_LENGTH) {

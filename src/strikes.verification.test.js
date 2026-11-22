@@ -20,7 +20,7 @@ process.env.DATA_DIR = DATA_DIR;
 
 const { setConfig, rutaDe } = await import('./services/guildStore.js');
 const { addStrike, removeLatestStrike, loadStrikes, loadStrikesFile, markReportSent, activeStrikes } = await import('./services/strikesStore.js');
-const { resolvePresent } = await import('./services/memberPresence.js');
+const { resolvePresence } = await import('./services/memberPresence.js');
 const { execute } = await import('./commands/strike.js');
 const { onGuildRemoved } = await import('./guildLifecycle.js');
 const { initializeStrikeReports, syncStrikeReport, cancelStrikeReport, __scheduledGuildsForTests } = await import('./strikeReportScheduler.js');
@@ -316,26 +316,47 @@ test('user: quien se fue sale en list con el nombre guardado y la marca', async 
   assert.ok(!text.includes(`<@${TARGET}>`));
 });
 
-test('user: si falla la comprobación de miembros nadie se marca como ido', async () => {
-  const guild = { members: { cache: new Map(), fetch: async () => { throw new Error('timeout'); } } };
-  assert.ok((await resolvePresent(guild, [TARGET])).has(TARGET));
+test('user: si falla la comprobación, quedan en desconocido y salen con mención, sin marca', async (t) => {
+  const error = mock.method(console, 'error', () => {});
+  t.after(() => error.mock.restore());
+  const g = await newGuild();
+  await seed(g, 'x', TARGET, 'nombre');
+  const guild = guildDouble(g, []);
+  guild.members.fetch = async () => {
+    throw new Error('timeout');
+  };
+  const { present, gone, unknown } = await resolvePresence(guild, [TARGET]);
+  assert.ok(unknown.has(TARGET));
+  assert.ok(!present.has(TARGET) && !gone.has(TARGET));
+
+  const i = strike(g, 'list', { guild });
+  await execute(i);
+  assert.ok(lastEmbed(i).description.includes(`<@${TARGET}>`));
+  assert.doesNotMatch(lastEmbed(i).description, /se fue/);
 });
 
-test('user: un fallo en un lote no borra a quien otro lote ya confirmó como ido', { todo: 'S-2: el catch da a todos por presentes' }, async () => {
-  const ids = Array.from({ length: 150 }, (_, n) => `4000000000000${String(n).padStart(5, '0')}`);
+test('user: un lote fallido no marca presente a nadie ni pisa lo que otro lote confirmó', async (t) => {
+  const error = mock.method(console, 'error', () => {});
+  t.after(() => error.mock.restore());
+  const ids = Array.from({ length: 250 }, (_, n) => `4000000000000${String(n).padStart(5, '0')}`);
   let calls = 0;
   const guild = {
     members: {
       cache: new Map(),
-      fetch: async () => {
+      fetch: async ({ user: batch }) => {
         if (++calls === 2) throw new Error('rate limited');
-        return new Map(); // el primer lote responde: ninguno de esos 100 está
+        // Solo el primero de cada lote sigue dentro.
+        return new Map([[batch[0], {}]]);
       },
     },
   };
-  const present = await resolvePresent(guild, ids);
-  assert.ok(!present.has(ids[0]), 'el primer lote ya confirmó que se fue');
-  assert.ok(present.has(ids[149]), 'el del lote fallido no se puede afirmar');
+  const { present, gone, unknown } = await resolvePresence(guild, ids);
+  assert.equal(calls, 3, 'un lote fallido no corta los siguientes');
+  assert.ok(present.has(ids[0]) && gone.has(ids[1]), 'el primer lote se conserva');
+  assert.ok(unknown.has(ids[100]) && unknown.has(ids[199]), 'el fallido queda en desconocido');
+  assert.ok(!present.has(ids[100]) && !gone.has(ids[100]));
+  assert.ok(present.has(ids[200]) && gone.has(ids[201]), 'el tercer lote se conserva');
+  assert.equal(present.size + gone.size + unknown.size, ids.length);
 });
 
 // --- permisos y aislamiento ---

@@ -10,7 +10,7 @@ import {
 import { ensureOfficer, isOfficer } from '../permissions.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
 import { notifyStrike } from '../logChannel.js';
-import { resolvePresent } from '../services/memberPresence.js';
+import { resolvePresence } from '../services/memberPresence.js';
 import {
   MAX_REASON_LENGTH,
   loadStrikes,
@@ -339,8 +339,8 @@ async function handleList(interaction, lang) {
   await paginate(interaction, pageCount, lang, async (page) => {
     const rows = summary.slice(page * LIST_PAGE_SIZE, (page + 1) * LIST_PAGE_SIZE);
     // Solo los de esta página: es lo que se va a enseñar.
-    const present = await resolvePresent(interaction.guild, rows.map((row) => row.userId));
-    return { embeds: [buildListEmbed({ rows, present, totalUsers: summary.length, totalStrikes, page, pageCount, lang })] };
+    const { gone } = await resolvePresence(interaction.guild, rows.map((row) => row.userId));
+    return { embeds: [buildListEmbed({ rows, gone, totalUsers: summary.length, totalStrikes, page, pageCount, lang })] };
   });
 }
 

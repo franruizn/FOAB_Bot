@@ -11,7 +11,7 @@ process.env.DATA_DIR = DATA_DIR;
 const { setConfig, rutaDe } = await import('../services/guildStore.js');
 const { addStrike, loadStrikes, activeStrikes, clearStrikes } = await import('../services/strikesStore.js');
 const { execute, data } = await import('./strike.js');
-const { resolvePresent } = await import('../services/memberPresence.js');
+const { resolvePresence } = await import('../services/memberPresence.js');
 const { checkPages } = await import('../ui/strikesEmbed.js');
 
 const GUILD = '700000000000000001';
@@ -312,8 +312,9 @@ test('list vacío en verde', async () => {
 
 test('si Discord no responde, nadie se marca como ido', async () => {
   const guild = { members: { cache: new Map(), fetch: async () => { throw new Error('timeout'); } } };
-  const present = await resolvePresent(guild, [TARGET]);
-  assert.ok(present.has(TARGET));
+  const { present, gone, unknown } = await resolvePresence(guild, [TARGET]);
+  assert.ok(unknown.has(TARGET));
+  assert.ok(!present.has(TARGET) && !gone.has(TARGET));
 });
 
 test('un fichero roto hace fallar el comando y no se sobrescribe', async () => {
