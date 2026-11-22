@@ -235,13 +235,40 @@ test('modelo: cambiar de nombre de usuario entre dos strikes sigue contando como
   assert.equal(strikes[1].userName, 'nuevo');
 });
 
-test('modelo: cambiar el APODO del servidor entre dos strikes se refleja en userName', { todo: 'S-1: se guarda username, no el apodo' }, async () => {
+test('modelo: cambiar el APODO del servidor entre dos strikes se refleja en userName', async () => {
   const g = await newGuild();
   await execute(strike(g, 'add', { reason: 'a', member: { displayName: 'ApodoViejo' } }));
   await execute(strike(g, 'add', { reason: 'b', member: { displayName: 'ApodoNuevo' } }));
   const strikes = await active(g);
   assert.equal(strikes.length, 2);
   assert.equal(strikes[1].userName, 'ApodoNuevo');
+});
+
+test('modelo: el apodo manda sobre el nombre global y el username', async () => {
+  const g = await newGuild();
+  await execute(strike(g, 'add', { reason: 'a', target: user(TARGET, { globalName: 'Global' }), member: { displayName: 'Apodo' } }));
+  assert.equal((await active(g))[0].userName, 'Apodo');
+});
+
+test('modelo: un strike a quien ya se fue conserva su último apodo', async () => {
+  const g = await newGuild();
+  await execute(strike(g, 'add', { reason: 'a', member: { displayName: 'Apodo' } }));
+  await execute(strike(g, 'add', { reason: 'b', member: null }));
+  assert.equal((await active(g))[1].userName, 'Apodo');
+});
+
+test('modelo: a quien se fue sin apodo conocido se le guarda su nombre global', async () => {
+  const g = await newGuild();
+  await execute(strike(g, 'add', { reason: 'a', target: user(TARGET, { globalName: 'Global' }), member: null }));
+  assert.equal((await active(g))[0].userName, 'Global');
+});
+
+test('modelo: el aviso a logs lleva el apodo', async () => {
+  const g = await newGuild();
+  const client = clientDouble([g]);
+  await execute(strike(g, 'add', { reason: 'a', client, member: { displayName: 'Apodo' } }));
+  assert.ok(await until(() => client.sent.length === 1));
+  assert.match(JSON.stringify(client.sent[0].payload.embeds[0].toJSON()), /Apodo/);
 });
 
 // --- parámetro user ---

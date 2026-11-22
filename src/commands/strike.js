@@ -160,23 +160,36 @@ async function respondCommitted(responder, payload) {
   }
 }
 
-const logBase = (interaction, target) => ({
+/**
+ * El apodo en este servidor: es lo que la gente reconoce cuando alguien se va
+ * y la mención deja de resolver. null si ya no está en el servidor.
+ */
+function serverName(interaction, target) {
+  const member = interaction.options.getMember('user');
+  if (!member) return null;
+  return member.displayName ?? member.nick ?? globalName(target);
+}
+
+const globalName = (user) => user.globalName ?? user.username;
+
+const logBase = (interaction, target, storedName) => ({
   guildId: interaction.guildId,
   actorId: interaction.user.id,
   actorTag: interaction.user.tag,
   targetId: target.id,
-  targetName: target.username,
+  targetName: serverName(interaction, target) ?? storedName ?? globalName(target),
 });
 
 async function handleAdd(interaction, target, reason, lang) {
   const { strike, activeCount } = await addStrike(interaction.guildId, {
     userId: target.id,
-    userName: target.username,
+    userName: serverName(interaction, target),
+    fallbackName: globalName(target),
     reason,
     addedBy: interaction.user.id,
   });
 
-  announce(interaction.client, { ...logBase(interaction, target), action: 'add', reason: strike.reason, total: activeCount });
+  announce(interaction.client, { ...logBase(interaction, target, strike.userName), action: 'add', reason: strike.reason, total: activeCount });
 
   await respondCommitted(interaction, {
     embeds: [
@@ -210,7 +223,7 @@ async function handleRemove(interaction, target, reason, lang) {
   }
 
   announce(interaction.client, {
-    ...logBase(interaction, target),
+    ...logBase(interaction, target, strike.userName),
     action: 'remove',
     reason: strike.reason,
     removedReason: reason,
@@ -290,7 +303,7 @@ async function handleClear(interaction, target, lang) {
     return;
   }
 
-  announce(interaction.client, { ...logBase(interaction, target), action: 'clear', cleared, total: activeCount });
+  announce(interaction.client, { ...logBase(interaction, target, active.at(-1).userName), action: 'clear', cleared, total: activeCount });
 
   const lines = [tn('strike.clear.done', cleared, lang, { user: target.id })];
   // Otro oficial puso uno mientras el botón estaba pendiente: ese no se ha visto.
@@ -310,7 +323,7 @@ async function handleCheck(interaction, target, lang) {
   // getMember sale de los datos resueltos de la propia interacción: null es
   // que no está en el servidor.
   const present = interaction.options.getMember('user') !== null;
-  const who = displayUser(target.id, lastKnownName(strikes, target.id) ?? target.username, present, lang);
+  const who = displayUser(target.id, lastKnownName(strikes, target.id) ?? globalName(target), present, lang);
   const pages = checkPages(active, lang);
 
   await paginate(interaction, pages.length, lang, async (page) => ({

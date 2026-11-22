@@ -198,16 +198,18 @@ function newStrikeId(strikes, now) {
 
 /**
  * @param {string} guildId
- * @param {{ userId: string, userName: string, reason: string, addedBy: string }} params
+ * @param {{ userId: string, userName?: string | null, fallbackName?: string, reason: string, addedBy: string }} params
+ *   userName: apodo actual en el servidor; null si ya no está, y entonces se
+ *   conserva el último apodo conocido antes de caer en fallbackName
  * @returns {Promise<{ strike: Strike, activeCount: number }>}
  */
-export async function addStrike(guildId, { userId, userName, reason, addedBy }) {
+export async function addStrike(guildId, { userId, userName = null, fallbackName, reason, addedBy }) {
   return mutateStrikes(guildId, (strikes) => {
     const now = Date.now();
     const strike = {
       id: newStrikeId(strikes, now),
       userId,
-      userName,
+      userName: userName ?? lastKnownName(strikes, userId) ?? fallbackName ?? null,
       reason,
       addedBy,
       addedAt: new Date(now).toISOString(),
