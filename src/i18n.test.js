@@ -112,7 +112,7 @@ test('nombres canónicos en inglés; /squads, /config y /strike sin traducir el 
   }
   assert.deepEqual(
     byName.config.options.map((sub) => sub.name),
-    ['view', 'officer', 'logs', 'raffle-role', 'dm-optout', 'server', 'guild', 'albionbb', 'language', 'strike-report', 'reset'],
+    ['view', 'officer', 'logs', 'raffle-role', 'dm-optout', 'server', 'guild', 'albionbb', 'language', 'strike-channel', 'strike-report', 'reset'],
   );
   assert.deepEqual(
     byName.squads.options.map((sub) => sub.name).sort(),

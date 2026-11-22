@@ -57,6 +57,7 @@ El resto de comandos de gestión siguen usando el rol de oficiales.
 | `/config guild name:<gremio>` | `albionGuild` | `/getkills` no funciona |
 | `/config albionbb value:<id>` | `albionbbGuildId` | `/attendance` no funciona |
 | `/config language value:<en\|es>` | `idioma` | por defecto, el idioma del servidor de Discord |
+| `/config strike-channel channel:<canal>` | `strikeChannelId` | opcional: sin aviso público de strikes (`off:True` lo desactiva) |
 | `/config strike-report day:<día> hour:<0-23>` | `strikeReport` | opcional: sin informe semanal de strikes (`day:off` lo desactiva) |
 | `/config reset field:<subcomando>` | — | vuelve el campo a su valor por defecto |
 
@@ -207,6 +208,13 @@ el rastro queda en el canal de logs.
 `strikes.json` es una lista de eventos: quitar un strike no lo borra, le pone
 `removedAt`, `removedBy` y `removedReason`. Cada escritura deja una copia en
 `backups/strikes-<timestamp>.json` (se conservan las últimas 10).
+
+### Aviso público
+
+Con `/config strike-channel`, cada strike puesto, quitado o limpiado se publica
+en ese canal y **notifica solo al afectado**. Es adicional al aviso del canal de
+logs; si ambos son el mismo canal, solo sale el público. Si no se puede publicar,
+el cambio queda guardado y la respuesta al oficial lo dice.
 
 ### Informe semanal
 

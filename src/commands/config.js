@@ -20,6 +20,8 @@ const LOG_CHANNEL_PERMISSIONS = [
   [PermissionFlagsBits.EmbedLinks, 'config.perm.embedLinks'],
   [PermissionFlagsBits.AttachFiles, 'config.perm.attachFiles'],
 ];
+// El aviso público es un embed: no necesita adjuntar ficheros.
+const STRIKE_CHANNEL_PERMISSIONS = LOG_CHANNEL_PERMISSIONS.filter(([flag]) => flag !== PermissionFlagsBits.AttachFiles);
 const ALBIONBB_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 // Quien copia la URL de la página del gremio en albionbb en vez del id:
 // https://europe.albionbb.com/guilds/<id>/attendance
@@ -100,6 +102,16 @@ export const data = localizedDescription(new SlashCommandBuilder().setName('conf
         // Cada idioma con su propio nombre: así lo reconoce quien lo habla.
         .addChoices({ name: 'English', value: 'en' }, { name: 'Español', value: 'es' }),
     ),
+  )
+  .addSubcommand((sub) =>
+    // Discord no admite "un canal o la palabra off" en una misma opción.
+    localizedDescription(sub.setName('strike-channel'), 'cmd.config.strikeChannel.description')
+      .addChannelOption((o) =>
+        localizedDescription(o.setName('channel'), 'cmd.config.opt.channel.description')
+          .setRequired(false)
+          .addChannelTypes(...LOG_CHANNEL_TYPES),
+      )
+      .addBooleanOption((o) => localizedDescription(o.setName('off'), 'cmd.config.opt.off.description').setRequired(false)),
   )
   .addSubcommand((sub) =>
     localizedDescription(sub.setName('strike-report'), 'cmd.config.strikeReport.description')
@@ -312,6 +324,24 @@ function validateLanguage(interaction) {
   return { value: language, note: null };
 }
 
+async function validateStrikeChannel(interaction) {
+  const off = interaction.options.getBoolean('off') === true;
+  const option = interaction.options.getChannel('channel');
+  if (off === Boolean(option)) throw new ConfigInputError('config.error.strikeChannelChoice');
+  if (off) return { value: null, note: null };
+
+  const channel = await interaction.guild.channels.fetch(option.id).catch(() => null);
+  if (!channel || !LOG_CHANNEL_TYPES.includes(channel.type)) throw new ConfigInputError('config.error.strikeChannelType');
+
+  const me = interaction.guild.members.me ?? (await interaction.guild.members.fetchMe());
+  const permissions = channel.permissionsFor(me);
+  const missing = STRIKE_CHANNEL_PERMISSIONS.filter(([flag]) => !permissions?.has(flag)).map(([, key]) => key);
+  if (missing.length > 0) throw new MissingPermissionsError(channel.id, missing);
+
+  const { logChannelId } = await getConfig(interaction.guildId);
+  return { value: channel.id, note: channel.id === logChannelId ? { key: 'config.note.strikeChannelSameAsLogs' } : null };
+}
+
 async function validateStrikeReport(interaction) {
   const day = interaction.options.getString('day', true);
   if (day === 'off') return { value: null, note: null };
@@ -343,5 +373,6 @@ const VALIDATORS = {
   guild: validateMainGuild,
   albionbb: validateAlbionbbId,
   language: validateLanguage,
+  'strike-channel': validateStrikeChannel,
   'strike-report': validateStrikeReport,
 };

@@ -61,8 +61,11 @@ function formatFieldForView(field, value, status, lang) {
  * @returns {string[]}
  */
 export function describeGaps(config, guild, lang) {
-  // Tener el informe apagado es una elección, no algo que falte por configurar.
-  return CONFIG_FIELDS.filter((field) => field.kind !== 'schedule' && fieldStatus(field, config[field.key], guild) !== 'set').map((field) =>
+  // Tenerlo apagado es una elección; apuntar a un canal borrado sí es un problema.
+  return CONFIG_FIELDS.filter((field) => {
+    const status = fieldStatus(field, config[field.key], guild);
+    return status !== 'set' && !(field.offByDefault && status === 'missing');
+  }).map((field) =>
     fieldGap(field, lang),
   );
 }

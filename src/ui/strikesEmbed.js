@@ -157,3 +157,36 @@ export function buildReportEmbeds({ rows, gone, changes, sinceMs, lateSlot = nul
     return embed;
   });
 }
+
+/**
+ * Aviso público de un cambio de strikes. Los motivos los escribe un oficial:
+ * siempre escapados. La línea de motivo de la retirada solo sale si lo hay.
+ * @param {{ action: 'add' | 'remove' | 'clear', targetId: string, targetName: string, targetPresent: boolean, actorId: string, total: number, reason?: string, removedReason?: string | null, addedAt?: string, cleared?: number }} notice
+ * @param {string} lang
+ * @returns {EmbedBuilder}
+ */
+export function buildStrikeNoticeEmbed({ action, targetId, targetName, targetPresent, actorId, total, reason, removedReason, addedAt, cleared }, lang) {
+  const who = t('strikeNotice.user', lang, { who: displayUser(targetId, targetName, targetPresent, lang) });
+  const totalLine = tn('strikeNotice.total', total, lang);
+
+  if (action === 'add') {
+    return new EmbedBuilder()
+      .setColor(RED)
+      .setTitle(t('strikeNotice.add.title', lang))
+      .setDescription(
+        [who, t('strikeNotice.reason', lang, { reason: escapeMarkdown(reason) }), t('strikeNotice.addedBy', lang, { by: actorId }), totalLine].join('\n'),
+      );
+  }
+
+  if (action === 'remove') {
+    const lines = [who, t('strikeNotice.original', lang, { reason: escapeMarkdown(reason), when: toUnix(addedAt) })];
+    if (removedReason) lines.push(t('strikeNotice.reason', lang, { reason: escapeMarkdown(removedReason) }));
+    lines.push(t('strikeNotice.removedBy', lang, { by: actorId }), totalLine);
+    return new EmbedBuilder().setColor(GREEN).setTitle(t('strikeNotice.remove.title', lang)).setDescription(lines.join('\n'));
+  }
+
+  return new EmbedBuilder()
+    .setColor(GREEN)
+    .setTitle(t('strikeNotice.clear.title', lang))
+    .setDescription([who, tn('strikeNotice.cleared', cleared, lang), t('strikeNotice.by', lang, { by: actorId }), totalLine].join('\n'));
+}

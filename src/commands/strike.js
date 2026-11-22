@@ -9,7 +9,8 @@ import {
 } from 'discord.js';
 import { ensureOfficer, isOfficer } from '../permissions.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
-import { notifyStrike } from '../logChannel.js';
+import { notifyStrike, notifyStrikePublic } from '../logChannel.js';
+import { getConfig } from '../services/guildStore.js';
 import { resolvePresence } from '../services/memberPresence.js';
 import {
   MAX_REASON_LENGTH,
@@ -136,28 +137,64 @@ export async function execute(interaction) {
 }
 
 /**
- * Aviso al canal de logs sin esperarlo: un canal borrado o lento no puede
- * retrasar ni tumbar la respuesta al oficial.
+ * Avisos de un cambio ya guardado: canal de logs y canal público. Quien llama
+ * no lo espera: un canal borrado o lento no puede retrasar ni tumbar la
+ * respuesta al oficial. Si los dos son el mismo canal, solo sale el público.
+ * Nunca rechaza.
+ * @returns {Promise<string | null>} el canal público si falló su aviso
  */
-function announce(client, params) {
-  notifyStrike(client, params).catch((error) => {
-    console.error('[strike] No se pudo avisar en el canal de logs:', error?.message ?? error);
-  });
+async function announce(client, params) {
+  let strikeChannelId = null;
+  let logChannelId = null;
+  try {
+    ({ strikeChannelId, logChannelId } = await getConfig(params.guildId));
+  } catch (error) {
+    console.error('[strike] No se pudo leer la config para avisar:', error?.message ?? error);
+  }
+
+  if (!strikeChannelId || strikeChannelId !== logChannelId) {
+    notifyStrike(client, params).catch((error) => {
+      console.error('[strike] No se pudo avisar en el canal de logs:', error?.message ?? error);
+    });
+  }
+  if (!strikeChannelId) return null;
+
+  try {
+    await notifyStrikePublic(client, { ...params, channelId: strikeChannelId });
+    return null;
+  } catch (error) {
+    console.error(`[strike] No se pudo publicar el aviso en ${strikeChannelId}:`, error?.message ?? error);
+    return strikeChannelId;
+  }
 }
 
 /**
  * Respuesta a un cambio YA guardado. Si falla no se propaga: el manejador
  * general diría "error inesperado, inténtalo de nuevo", y reintentar aquí es
  * poner el mismo strike dos veces. El rastro ya está en el canal de logs.
+ *
+ * Responde sin esperar al aviso público; si ese aviso acaba fallando, se añade
+ * a la misma respuesta para que el oficial sepa que nadie se ha enterado.
  * @param {{ editReply: (payload: object) => Promise<unknown> }} responder
+ * @param {Promise<string | null>} notice - lo que devuelve announce()
+ * @param {string} lang
  * @param {object} payload
  */
-async function respondCommitted(responder, payload) {
+async function respondCommitted(responder, notice, lang, payload) {
   try {
     await responder.editReply(payload);
   } catch (error) {
     console.error('[strike] Cambio guardado, pero no se pudo responder al oficial:', error?.message ?? error);
+    return;
   }
+  notice
+    .then((failedChannelId) => {
+      if (!failedChannelId) return undefined;
+      return responder.editReply({ content: t('strike.publicFailed', lang, { channel: failedChannelId }), allowedMentions: NO_PINGS });
+    })
+    .catch((error) => {
+      console.error('[strike] No se pudo avisar al oficial del fallo del aviso público:', error?.message ?? error);
+    });
 }
 
 /**
@@ -178,6 +215,7 @@ const logBase = (interaction, target, storedName) => ({
   actorTag: interaction.user.tag,
   targetId: target.id,
   targetName: serverName(interaction, target) ?? storedName ?? globalName(target),
+  targetPresent: interaction.options.getMember('user') !== null,
 });
 
 async function handleAdd(interaction, target, reason, lang) {
@@ -189,9 +227,9 @@ async function handleAdd(interaction, target, reason, lang) {
     addedBy: interaction.user.id,
   });
 
-  announce(interaction.client, { ...logBase(interaction, target, strike.userName), action: 'add', reason: strike.reason, total: activeCount });
+  const notice = announce(interaction.client, { ...logBase(interaction, target, strike.userName), action: 'add', reason: strike.reason, total: activeCount });
 
-  await respondCommitted(interaction, {
+  await respondCommitted(interaction, notice, lang, {
     embeds: [
       new EmbedBuilder()
         .setColor(strikeColor(activeCount))
@@ -222,7 +260,7 @@ async function handleRemove(interaction, target, reason, lang) {
     return;
   }
 
-  announce(interaction.client, {
+  const notice = announce(interaction.client, {
     ...logBase(interaction, target, strike.userName),
     action: 'remove',
     reason: strike.reason,
@@ -241,7 +279,7 @@ async function handleRemove(interaction, target, reason, lang) {
   if (reason) lines.push(t('strike.remove.why', lang, { reason: escapeMarkdown(reason) }));
   lines.push(tn('strike.remaining', activeCount, lang));
 
-  await respondCommitted(interaction, {
+  await respondCommitted(interaction, notice, lang, {
     embeds: [new EmbedBuilder().setColor(strikeColor(activeCount)).setTitle(t('strike.remove.title', lang)).setDescription(lines.join('\n\n'))],
     allowedMentions: NO_PINGS,
   });
@@ -303,12 +341,12 @@ async function handleClear(interaction, target, lang) {
     return;
   }
 
-  announce(interaction.client, { ...logBase(interaction, target, active.at(-1).userName), action: 'clear', cleared, total: activeCount });
+  const notice = announce(interaction.client, { ...logBase(interaction, target, active.at(-1).userName), action: 'clear', cleared, total: activeCount });
 
   const lines = [tn('strike.clear.done', cleared, lang, { user: target.id })];
   // Otro oficial puso uno mientras el botón estaba pendiente: ese no se ha visto.
   if (activeCount > 0) lines.push(tn('strike.remaining', activeCount, lang));
-  await respondCommitted(button, {
+  await respondCommitted(button, notice, lang, {
     content: null,
     embeds: [new EmbedBuilder().setColor(strikeColor(activeCount)).setTitle(t('strike.clear.title', lang)).setDescription(lines.join('\n\n'))],
     components: [],

@@ -18,6 +18,7 @@ import { LocalizedError, t, commandName } from '../i18n.js';
  * @property {'role' | 'channel' | 'text' | 'language' | 'schedule'} kind
  * @property {boolean} required
  * @property {string[]} blocks
+ * @property {boolean} [offByDefault] - sin valor es una elección válida, no algo que falte
  */
 
 /** @type {ConfigField[]} */
@@ -30,7 +31,8 @@ export const CONFIG_FIELDS = [
   { key: 'albionGuild', sub: 'guild', kind: 'text', required: true, blocks: ['getkills'] },
   { key: 'albionbbGuildId', sub: 'albionbb', kind: 'text', required: true, blocks: ['attendance'] },
   { key: 'idioma', sub: 'language', kind: 'language', required: false, blocks: [] },
-  { key: 'strikeReport', sub: 'strike-report', kind: 'schedule', required: false, blocks: [] },
+  { key: 'strikeChannelId', sub: 'strike-channel', kind: 'channel', required: false, blocks: [], offByDefault: true },
+  { key: 'strikeReport', sub: 'strike-report', kind: 'schedule', required: false, blocks: [], offByDefault: true },
 ];
 
 const FIELDS_BY_KEY = new Map(CONFIG_FIELDS.map((field) => [field.key, field]));

@@ -35,6 +35,7 @@ const EDITABLE_KEYS = new Set([
   'albionGuild',
   'albionbbGuildId',
   'idioma',
+  'strikeChannelId',
   'strikeReport',
   'strikeReportDesde',
   'configuradoEn',
@@ -70,6 +71,8 @@ export function defaultConfig(guildId) {
     // Idioma de los mensajes públicos. null hasta que se fija: al entrar en el
     // servidor sale de su preferredLocale (ver guildLifecycle.js).
     idioma: null,
+    // Canal del aviso público de /strike; null = no se publica nada.
+    strikeChannelId: null,
     // Informe semanal de strikes: "monday 12", o null si está desactivado.
     strikeReport: null,
     // Desde cuándo rige ese horario: las citas anteriores no cuentan como atrasadas.

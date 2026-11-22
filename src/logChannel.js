@@ -2,7 +2,8 @@ import { EmbedBuilder, AttachmentBuilder, escapeMarkdown } from 'discord.js';
 import { getConfig, LANGUAGES } from './services/guildStore.js';
 import { fieldLabel } from './services/configFields.js';
 import { formatValue } from './ui/configEmbed.js';
-import { t, tn, DEFAULT_LANGUAGE } from './i18n.js';
+import { buildStrikeNoticeEmbed } from './ui/strikesEmbed.js';
+import { t, tn, guildLang, DEFAULT_LANGUAGE } from './i18n.js';
 
 const MUTATION_COLOR = 0x5865f2;
 const ERROR_COLOR = 0xed4245;
@@ -98,6 +99,30 @@ export async function notifyStrike(client, { guildId, action, actorId, actorTag,
     [],
     { allowedMentions: { parse: [] } },
   );
+}
+
+/**
+ * Aviso público de /strike en su canal. A diferencia de los avisos a logs,
+ * LANZA si no se puede enviar: quien lo llama se lo dice al oficial.
+ *
+ * La mención va en `content` porque Discord NO notifica las menciones de un
+ * embed. allowedMentions limita el ping al afectado: el oficial del embed, los
+ * roles y @everyone no reciben nada. A quien ya no está no se le menciona.
+ * @param {import('discord.js').Client} client
+ * @param {{ channelId: string, guildId: string, targetId: string, targetPresent: boolean } & Parameters<typeof buildStrikeNoticeEmbed>[0]} params
+ */
+export async function notifyStrikePublic(client, { channelId, guildId, ...notice }) {
+  const channel = await client.channels.fetch(channelId);
+  if (!channel?.isTextBased()) throw new Error(`strikeChannelId (${channelId}) no es un canal de texto`);
+  // Un id copiado de otro servidor publicaría la disciplina de este en aquel.
+  if (channel.guildId !== guildId) throw new Error(`strikeChannelId (${channelId}) no pertenece al servidor ${guildId}`);
+
+  const lang = await guildLang(guildId);
+  await channel.send({
+    ...(notice.targetPresent ? { content: `<@${notice.targetId}>` } : {}),
+    embeds: [buildStrikeNoticeEmbed(notice, lang)],
+    allowedMentions: { users: [notice.targetId] },
+  });
 }
 
 /**
