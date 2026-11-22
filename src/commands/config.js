@@ -7,7 +7,9 @@ import { isAdministrator } from '../permissions.js';
 import { notifyConfigChange } from '../logChannel.js';
 import { buildConfigViewEmbed, buildConfigChangeEmbed, formatValue } from '../ui/configEmbed.js';
 import { errorEmbed } from '../ui/errorEmbed.js';
-import { t, userLang, langFromLocale, localizedDescription, LocalizedError } from '../i18n.js';
+import { WEEKDAYS, parseSchedule, slotsAround } from '../services/strikeReportSchedule.js';
+import { syncStrikeReport } from '../strikeReportScheduler.js';
+import { t, userLang, langFromLocale, localizedDescription, localizedChoice, LocalizedError } from '../i18n.js';
 
 const LOG_CHANNEL_TYPES = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
 // Lo que necesita el bot en el canal de logs: los avisos son embeds y los
@@ -100,6 +102,21 @@ export const data = localizedDescription(new SlashCommandBuilder().setName('conf
     ),
   )
   .addSubcommand((sub) =>
+    localizedDescription(sub.setName('strike-report'), 'cmd.config.strikeReport.description')
+      .addStringOption((o) =>
+        localizedDescription(o.setName('day'), 'cmd.config.opt.day.description')
+          .setRequired(true)
+          // De lunes a domingo, y "off" para desactivarlo. El valor no se traduce.
+          .addChoices(
+            ...[...WEEKDAYS.slice(1), WEEKDAYS[0]].map((day) => localizedChoice(`strikeReport.day.${day}`, day)),
+            localizedChoice('strikeReport.choice.off', 'off'),
+          ),
+      )
+      .addIntegerOption((o) =>
+        localizedDescription(o.setName('hour'), 'cmd.config.opt.hour.description').setRequired(false).setMinValue(0).setMaxValue(23),
+      ),
+  )
+  .addSubcommand((sub) =>
     localizedDescription(sub.setName('reset'), 'cmd.config.reset.description').addStringOption((o) =>
       localizedDescription(o.setName('field'), 'cmd.config.opt.field.description')
         .setRequired(true)
@@ -179,10 +196,15 @@ async function applyChange(interaction, field, value, note, lang) {
 
   const { previous, config } = await updateConfig(guildId, {
     [field.key]: value,
+    // Las citas anteriores a este horario no cuentan como informes atrasados.
+    ...(field.key === 'strikeReport' ? { strikeReportDesde: value ? new Date().toISOString() : null } : {}),
     configuradoEn: new Date().toISOString(),
     configuradoPor: interaction.user.id,
   });
   const before = previous[field.key];
+  if (field.key === 'strikeReport' || field.key === 'logChannelId') {
+    await syncStrikeReport(interaction.client, guildId);
+  }
 
   await notifyConfigChange(interaction.client, {
     guildId,
@@ -290,6 +312,28 @@ function validateLanguage(interaction) {
   return { value: language, note: null };
 }
 
+async function validateStrikeReport(interaction) {
+  const day = interaction.options.getString('day', true);
+  if (day === 'off') return { value: null, note: null };
+
+  const hour = interaction.options.getInteger('hour');
+  if (hour === null) throw new ConfigInputError('config.error.strikeReportHour');
+  const value = `${day} ${hour}`;
+  if (!parseSchedule(value)) throw new ConfigInputError('config.error.strikeReportHour');
+
+  const { logChannelId } = await getConfig(interaction.guildId);
+  if (!logChannelId) return { value, note: { key: 'config.note.strikeReportNoLogs' } };
+  // La zona a la vista: "lunes 12" en un contenedor en UTC no son las 12 de aquí.
+  const { next } = slotsAround(Date.now(), parseSchedule(value));
+  return {
+    value,
+    note: {
+      key: 'config.note.strikeReportNext',
+      values: { when: Math.floor(next / 1000), tz: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    },
+  };
+}
+
 const VALIDATORS = {
   officer: (interaction) => validateRole(interaction, 'config.error.everyone.officer'),
   logs: validateLogChannel,
@@ -299,4 +343,5 @@ const VALIDATORS = {
   guild: validateMainGuild,
   albionbb: validateAlbionbbId,
   language: validateLanguage,
+  'strike-report': validateStrikeReport,
 };

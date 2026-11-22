@@ -20,7 +20,7 @@ const SRC_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // --- el árbol de comandos: lo que Discord rechazaría al registrar ---
 
-const COMMAND_MODULES = ['getkills', 'squads', 'attendance', 'health', 'sorteo', 'raffleCancel', 'crearRol', 'dm', 'config'];
+const COMMAND_MODULES = ['getkills', 'squads', 'attendance', 'health', 'sorteo', 'raffleCancel', 'crearRol', 'dm', 'config', 'strike'];
 const commands = await Promise.all(
   COMMAND_MODULES.map(async (name) => (await import(`./commands/${name}.js`)).data.toJSON()),
 );
@@ -90,9 +90,9 @@ test('no hay nombres de comando duplicados en ningún idioma, ni de opción dent
   }
 });
 
-test('nombres canónicos en inglés; /squads y /config sin traducir el nombre, el resto traducidos', () => {
+test('nombres canónicos en inglés; /squads, /config y /strike sin traducir el nombre, el resto traducidos', () => {
   const byName = Object.fromEntries(commands.map((command) => [command.name, command]));
-  assert.deepEqual(Object.keys(byName).sort(), ['attendance', 'config', 'create-role', 'dm', 'getkills', 'health', 'raffle', 'raffle-cancel', 'squads']);
+  assert.deepEqual(Object.keys(byName).sort(), ['attendance', 'config', 'create-role', 'dm', 'getkills', 'health', 'raffle', 'raffle-cancel', 'squads', 'strike']);
 
   const es = (name) => byName[name].name_localizations?.['es-ES'];
   assert.equal(es('raffle'), 'sorteo');
@@ -104,7 +104,7 @@ test('nombres canónicos en inglés; /squads y /config sin traducir el nombre, e
   assert.equal(es('dm'), 'dm');
 
   // Administración: un único nombre en todo el árbol, pero descripciones traducidas.
-  for (const name of ['squads', 'config']) {
+  for (const name of ['squads', 'config', 'strike']) {
     for (const [where, node] of walk(byName[name])) {
       assert.equal(node.name_localizations ?? null, null, `${where} no debe traducir el nombre`);
       assert.ok(node.description_localizations?.['es-ES'], `${where} sin descripción en español`);
@@ -112,7 +112,7 @@ test('nombres canónicos en inglés; /squads y /config sin traducir el nombre, e
   }
   assert.deepEqual(
     byName.config.options.map((sub) => sub.name),
-    ['view', 'officer', 'logs', 'raffle-role', 'dm-optout', 'server', 'guild', 'albionbb', 'language', 'reset'],
+    ['view', 'officer', 'logs', 'raffle-role', 'dm-optout', 'server', 'guild', 'albionbb', 'language', 'strike-report', 'reset'],
   );
   assert.deepEqual(
     byName.squads.options.map((sub) => sub.name).sort(),

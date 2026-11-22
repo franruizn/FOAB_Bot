@@ -2,10 +2,11 @@ import { readdir, stat, access } from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR } from '../dataPaths.js';
 import { withFileLock, readJsonFile, atomicWriteJson } from './fileStore.js';
+import { parseSchedule } from './strikeReportSchedule.js';
 
 // Configuración y datos aislados por servidor de Discord:
 //
-//   DATA_DIR/guilds/<guildId>/config.json | squads.json | raffles.json | backups/
+//   DATA_DIR/guilds/<guildId>/config.json | squads.json | raffles.json | strikes.json | backups/
 //
 // Toda ruta de un fichero de servidor sale de rutaDe(): es el único sitio que
 // sabe construirla y el único que valida el guildId (un id que no sea un
@@ -34,6 +35,8 @@ const EDITABLE_KEYS = new Set([
   'albionGuild',
   'albionbbGuildId',
   'idioma',
+  'strikeReport',
+  'strikeReportDesde',
   'configuradoEn',
   'configuradoPor',
 ]);
@@ -67,6 +70,10 @@ export function defaultConfig(guildId) {
     // Idioma de los mensajes públicos. null hasta que se fija: al entrar en el
     // servidor sale de su preferredLocale (ver guildLifecycle.js).
     idioma: null,
+    // Informe semanal de strikes: "monday 12", o null si está desactivado.
+    strikeReport: null,
+    // Desde cuándo rige ese horario: las citas anteriores no cuentan como atrasadas.
+    strikeReportDesde: null,
     configuradoEn: null,
     configuradoPor: null,
   };
@@ -188,6 +195,8 @@ function validateChanges(cambios) {
       if (value !== null && !LANGUAGES.has(value)) {
         throw new GuildConfigError(`"idioma" debe ser uno de: ${[...LANGUAGES].join(', ')}, o null.`);
       }
+    } else if (key === 'strikeReport') {
+      if (value !== null && !parseSchedule(value)) throw new GuildConfigError('"strikeReport" debe ser "<día en inglés> <hora 0-23>" o null.');
     } else if (value !== null && typeof value !== 'string') {
       throw new GuildConfigError(`"${key}" debe ser un texto o null.`);
     }

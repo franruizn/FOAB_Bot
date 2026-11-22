@@ -9,6 +9,7 @@ import * as crearRol from './commands/crearRol.js';
 import * as raffleCancel from './commands/raffleCancel.js';
 import * as dm from './commands/dm.js';
 import * as config from './commands/config.js';
+import * as strike from './commands/strike.js';
 import { handleInteractionError } from './interactionErrorHandler.js';
 import { waitForAllFileWrites } from './services/fileStore.js';
 import { migrarAMultiguild } from './services/multiguildMigration.js';
@@ -16,6 +17,7 @@ import { parseAllowedGuildIds, onGuildPresent, onGuildRemoved, reconcileGuilds }
 import { rejectOutsideGuild } from './permissions.js';
 import { notifyUncontrolledError, notifyDmInterrupted } from './logChannel.js';
 import { initializeRaffles, handleRaffleReactionAdd } from './raffleScheduler.js';
+import { initializeStrikeReports, syncStrikeReport, cancelStrikeReport } from './strikeReportScheduler.js';
 import { takeInterruptedDmSend } from './services/massDm.js';
 import { DM_STATE_PATH } from './dataPaths.js';
 
@@ -59,7 +61,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-for (const command of [getkills, squads, attendance, health, sorteo, raffleCancel, crearRol, dm, config]) {
+for (const command of [getkills, squads, attendance, health, sorteo, raffleCancel, crearRol, dm, config, strike]) {
   client.commands.set(command.data.name, command);
 }
 
@@ -78,6 +80,11 @@ client.once(Events.ClientReady, async (readyClient) => {
     console.error('[raffle] Error inicializando sorteos pendientes:', error?.stack ?? error);
   }
   try {
+    await initializeStrikeReports(readyClient, { allowed: allowedGuildIds });
+  } catch (error) {
+    console.error('[strike-report] Error inicializando los informes:', error?.stack ?? error);
+  }
+  try {
     // Un /dm cortado por el reinicio NO se reanuda (reenviar a quien ya lo
     // recibió es peor que no enviar): solo se avisa de cuántos salieron.
     const interrumpido = await takeInterruptedDmSend(DM_STATE_PATH);
@@ -91,15 +98,23 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 client.on(Events.GuildCreate, (guild) => {
-  onGuildPresent(guild, { allowed: allowedGuildIds }).catch((error) => {
-    console.error(`[guild] Error procesando la entrada en ${guild.id}:`, error?.stack ?? error);
-  });
+  onGuildPresent(guild, { allowed: allowedGuildIds })
+    // Un servidor que vuelve recupera su horario. Del que se sale no se toca nada.
+    .then((status) => (status === 'left' ? undefined : syncStrikeReport(client, guild.id)))
+    .catch((error) => {
+      console.error(`[guild] Error procesando la entrada en ${guild.id}:`, error?.stack ?? error);
+    });
 });
 
 client.on(Events.GuildDelete, (guild) => {
-  onGuildRemoved(guild).catch((error) => {
-    console.error(`[guild] Error procesando la salida de ${guild.id}:`, error?.stack ?? error);
-  });
+  onGuildRemoved(guild)
+    // false en una caída de Discord: el servidor sigue siendo nuestro.
+    .then((removed) => {
+      if (removed) cancelStrikeReport(guild.id);
+    })
+    .catch((error) => {
+      console.error(`[guild] Error procesando la salida de ${guild.id}:`, error?.stack ?? error);
+    });
 });
 
 /**

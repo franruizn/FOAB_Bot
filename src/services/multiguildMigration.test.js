@@ -86,6 +86,8 @@ test('migración: mueve squads.json, raffles.json y backups/ al servidor y crea 
     albionbbGuildId: 'albionbb-123',
     // Lo fija el arranque (reconcileGuilds) con el preferredLocale del servidor.
     idioma: null,
+    strikeReport: null,
+    strikeReportDesde: null,
     configuradoEn: NOW.toISOString(),
     configuradoPor: 'migración desde .env',
   });

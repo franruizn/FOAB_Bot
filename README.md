@@ -27,6 +27,7 @@ DATA_DIR/
       config.json     rol de oficiales, canal de logs, gremio de Albion...
       squads.json
       raffles.json
+      strikes.json    historial de /strike
       backups/
   backups/            copia previa a la migración multiservidor
   dm.json             estado de /dm (es del bot, no de un servidor)
@@ -56,6 +57,7 @@ El resto de comandos de gestión siguen usando el rol de oficiales.
 | `/config guild name:<gremio>` | `albionGuild` | `/getkills` no funciona |
 | `/config albionbb value:<id>` | `albionbbGuildId` | `/attendance` no funciona |
 | `/config language value:<en\|es>` | `idioma` | por defecto, el idioma del servidor de Discord |
+| `/config strike-report day:<día> hour:<0-23>` | `strikeReport` | opcional: sin informe semanal de strikes (`day:off` lo desactiva) |
 | `/config reset field:<subcomando>` | — | vuelve el campo a su valor por defecto |
 
 - `/config guild` acepta **un solo** gremio, el principal. Los demás se siguen
@@ -128,8 +130,9 @@ nombre y la descripción del idioma del **cliente** de cada usuario
 | `/dm role list` | `/dm rol lista` |
 | `/squads …` | `/squads …` (igual) |
 | `/config …` | `/config …` (igual) |
+| `/strike …` | `/strike …` (igual) |
 
-`/squads` y `/config` son de administración: su nombre, sus subcomandos y sus
+`/squads`, `/config` y `/strike` son de administración: su nombre, sus subcomandos y sus
 opciones son **solo en inglés**, para que cualquier guía sirva a todos. Sus
 descripciones sí se traducen.
 
@@ -185,6 +188,40 @@ Un `squads.json` en el formato viejo (squads como arrays y una lista `guilds`) s
 convierte solo la primera vez que se carga, con backup: los arrays pasan a
 `{ "isGuild": false, "members": [...] }` y los gremios de la lista vieja que no
 son el principal pasan a squads de gremio.
+
+## Strikes: `/strike`
+
+Registro de disciplina por usuario de Discord. Todo es del rol de oficiales,
+menos `check`: cualquiera puede consultar sus propios strikes. Un oficial no
+puede ponerse ni quitarse strikes a sí mismo. Todas las respuestas son efímeras;
+el rastro queda en el canal de logs.
+
+| Comando | Qué hace |
+| --- | --- |
+| `/strike add user reason` | Pone un strike (motivo obligatorio, máx. 200) |
+| `/strike remove user [reason]` | Quita el strike activo más reciente |
+| `/strike clear user` | Quita todos los activos, con confirmación |
+| `/strike check user` | Strikes activos y recuento de retirados (los propios, o los de cualquiera si eres oficial) |
+| `/strike list` | Usuarios con strikes activos, de más a menos |
+
+`strikes.json` es una lista de eventos: quitar un strike no lo borra, le pone
+`removedAt`, `removedBy` y `removedReason`. Cada escritura deja una copia en
+`backups/strikes-<timestamp>.json` (se conservan las últimas 10).
+
+### Informe semanal
+
+Con `/config strike-report`, cada servidor recibe en su canal de logs, el día y
+la hora que elija, quién tiene strikes activos y cuántos se añadieron y quitaron
+desde el informe anterior. Está **desactivado por defecto** y no pinga a nadie.
+
+La hora se interpreta en la zona horaria del proceso: **define `TZ` en `.env`**
+(por ejemplo `TZ=Europe/Madrid`) o en Docker serán horas UTC. `/config
+strike-report` enseña la zona que está usando y la fecha del próximo informe.
+
+El temporizador no sobrevive a un reinicio, pero `lastReportAt` (en
+`strikes.json`) sí: al arrancar, si la última cita quedó sin mandar, el informe
+sale en ese momento con una nota de retraso. Si un envío falla, queda en el log
+y no se reintenta: el siguiente sale en su cita.
 
 ## Arrancar el bot
 

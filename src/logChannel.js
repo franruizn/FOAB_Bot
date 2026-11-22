@@ -1,4 +1,4 @@
-import { EmbedBuilder, AttachmentBuilder } from 'discord.js';
+import { EmbedBuilder, AttachmentBuilder, escapeMarkdown } from 'discord.js';
 import { getConfig, LANGUAGES } from './services/guildStore.js';
 import { fieldLabel } from './services/configFields.js';
 import { formatValue } from './ui/configEmbed.js';
@@ -18,9 +18,9 @@ const ERROR_COLOR = 0xed4245;
  * @param {string | null} guildId
  * @param {(lang: string) => EmbedBuilder} buildEmbed
  * @param {AttachmentBuilder[]} [files]
- * @param {{ channelId?: string }} [options]
+ * @param {{ channelId?: string, allowedMentions?: import('discord.js').MessageMentionOptions }} [options]
  */
-async function sendToLogChannel(client, guildId, buildEmbed, files = [], { channelId: channelIdOverride } = {}) {
+async function sendToLogChannel(client, guildId, buildEmbed, files = [], { channelId: channelIdOverride, allowedMentions } = {}) {
   if (!guildId) return;
 
   try {
@@ -40,7 +40,7 @@ async function sendToLogChannel(client, guildId, buildEmbed, files = [], { chann
       return;
     }
     const lang = LANGUAGES.has(idioma) ? idioma : DEFAULT_LANGUAGE;
-    await channel.send({ embeds: [buildEmbed(lang)], files });
+    await channel.send({ embeds: [buildEmbed(lang)], files, ...(allowedMentions ? { allowedMentions } : {}) });
   } catch (error) {
     // Nunca debe romper el flujo del comando que la disparó.
     console.error('[logChannel] No se pudo enviar al canal de logs:', error.stack ?? error);
@@ -66,6 +66,51 @@ export async function notifySquadMutation(client, { guildId, actorTag, subcomman
       )
       .setTimestamp(new Date()),
   );
+}
+
+/**
+ * Notifica en el canal de logs del servidor (si está configurado) un cambio
+ * de /strike: quién, a quién, por qué y con cuántos se queda. El nombre va
+ * junto a la mención porque este historial se relee cuando quizá ya se fue.
+ * @param {import('discord.js').Client} client
+ * @param {{ guildId: string, action: 'add' | 'remove' | 'clear', actorId: string, actorTag: string, targetId: string, targetName: string, total: number, reason?: string, removedReason?: string | null, addedAt?: string, cleared?: number }} params
+ */
+export async function notifyStrike(client, { guildId, action, actorId, actorTag, targetId, targetName, total, reason, removedReason, addedAt, cleared }) {
+  const titles = { add: 'strike.log.add.title', remove: 'strike.log.remove.title', clear: 'strike.log.clear.title' };
+  await sendToLogChannel(
+    client,
+    guildId,
+    (lang) => {
+      const fields = [
+        { name: t('log.field.officer', lang), value: `${escapeMarkdown(actorTag)} (<@${actorId}>)`, inline: true },
+        { name: t('log.field.user', lang), value: `<@${targetId}> (${escapeMarkdown(targetName)})`, inline: true },
+        { name: t('strike.log.field.total', lang), value: String(total), inline: true },
+      ];
+      if (action === 'add') fields.push({ name: t('strike.log.field.reason', lang), value: escapeMarkdown(reason) });
+      if (action === 'remove') {
+        fields.push({ name: t('strike.log.field.originalReason', lang), value: escapeMarkdown(reason) });
+        fields.push({ name: t('strike.log.field.given', lang), value: `<t:${Math.floor(Date.parse(addedAt) / 1000)}:f>`, inline: true });
+        if (removedReason) fields.push({ name: t('strike.log.field.removedReason', lang), value: escapeMarkdown(removedReason) });
+      }
+      if (action === 'clear') fields.push({ name: t('strike.log.field.cleared', lang), value: String(cleared), inline: true });
+      return new EmbedBuilder().setColor(MUTATION_COLOR).setTitle(t(titles[action], lang)).addFields(fields).setTimestamp(new Date());
+    },
+    [],
+    { allowedMentions: { parse: [] } },
+  );
+}
+
+/**
+ * Informe semanal de strikes: un mensaje por embed y sin pingar a nadie. Un
+ * fallo de envío queda en el log y no se propaga (ver sendToLogChannel).
+ * @param {import('discord.js').Client} client
+ * @param {string} guildId
+ * @param {EmbedBuilder[]} embeds
+ */
+export async function notifyStrikeReport(client, guildId, embeds) {
+  for (const embed of embeds) {
+    await sendToLogChannel(client, guildId, () => embed, [], { allowedMentions: { parse: [] } });
+  }
 }
 
 /**

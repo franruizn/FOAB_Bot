@@ -1,5 +1,6 @@
 import { EmbedBuilder } from 'discord.js';
 import { CONFIG_FIELDS, fieldLabel, fieldGap } from '../services/configFields.js';
+import { parseSchedule } from '../services/strikeReportSchedule.js';
 import { t } from '../i18n.js';
 
 const OK_COLOR = 0x57f287;
@@ -30,6 +31,11 @@ export function fieldStatus(field, value, guild) {
  * @param {string} lang
  */
 export function formatValue(field, value, lang) {
+  if (field.kind === 'schedule') {
+    const schedule = parseSchedule(value);
+    if (!schedule) return t('strikeReport.off', lang);
+    return t('strikeReport.when', lang, { day: t(`strikeReport.day.${schedule.dayName}`, lang), hour: String(schedule.hour).padStart(2, '0') });
+  }
   if (!value) return t('common.notConfigured', lang);
   if (field.kind === 'role') return `<@&${value}>`;
   if (field.kind === 'channel') return `<#${value}>`;
@@ -38,6 +44,7 @@ export function formatValue(field, value, lang) {
 }
 
 function formatFieldForView(field, value, status, lang) {
+  if (status === 'missing' && field.kind === 'schedule') return `➖ ${formatValue(field, value, lang)}`;
   if (status === 'missing') return t(field.required ? 'config.view.missingRequired' : 'config.view.missingOptional', lang);
   if (status === 'broken') {
     return t(field.kind === 'role' ? 'config.view.brokenRole' : 'config.view.brokenChannel', lang, { id: value });
@@ -54,7 +61,8 @@ function formatFieldForView(field, value, status, lang) {
  * @returns {string[]}
  */
 export function describeGaps(config, guild, lang) {
-  return CONFIG_FIELDS.filter((field) => fieldStatus(field, config[field.key], guild) !== 'set').map((field) =>
+  // Tener el informe apagado es una elección, no algo que falte por configurar.
+  return CONFIG_FIELDS.filter((field) => field.kind !== 'schedule' && fieldStatus(field, config[field.key], guild) !== 'set').map((field) =>
     fieldGap(field, lang),
   );
 }

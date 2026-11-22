@@ -9,6 +9,7 @@ import { data as crearRolCommand } from './commands/crearRol.js';
 import { data as raffleCancelCommand } from './commands/raffleCancel.js';
 import { data as dmCommand } from './commands/dm.js';
 import { data as configCommand } from './commands/config.js';
+import { data as strikeCommand } from './commands/strike.js';
 import { planDeploy } from './deployPlan.js';
 
 // Acepta el modo como argumento CLI (para que los scripts de package.json
@@ -25,7 +26,7 @@ if (!DISCORD_TOKEN || !CLIENT_ID) {
 
 const { steps, warnings } = planDeploy({
   scope: DEPLOY_SCOPE,
-  commands: [getkillsCommand, squadsCommand, attendanceCommand, healthCommand, sorteoCommand, raffleCancelCommand, crearRolCommand, configCommand],
+  commands: [getkillsCommand, squadsCommand, attendanceCommand, healthCommand, sorteoCommand, raffleCancelCommand, crearRolCommand, configCommand, strikeCommand],
   dmCommand,
   env: process.env,
 });
